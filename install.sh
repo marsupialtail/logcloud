@@ -6,6 +6,7 @@ sudo apt install g++
 sudo apt install unzip
 sudo apt install zlib1g-dev
 sudo apt install libssl-dev
+sudo apt install libzstd-dev libsnappy-dev liblz4-dev
 
 git clone https://github.com/aws/aws-sdk-cpp.git
 cd aws-sdk-cpp/
