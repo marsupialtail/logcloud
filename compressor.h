@@ -1,8 +1,10 @@
+#pragma once
 #include <string>
 #include <stdexcept>
 #include <zstd.h>
 #include <snappy.h>
 #include <lz4.h>
+#include <iostream>
 
 enum class CompressionAlgorithm {
     ZSTD,
@@ -14,7 +16,7 @@ class Compressor {
 public:
     explicit Compressor(CompressionAlgorithm algorithm) : algorithm_(algorithm) {}
 
-    std::string compress(const char* data, size_t size, int compression_level = 19) {
+    std::string compress(const char* data, size_t size, int compression_level = 5) {
         switch (algorithm_) {
             case CompressionAlgorithm::ZSTD:
                 return compressZstd(data, size, compression_level);
@@ -45,8 +47,19 @@ private:
 
     std::string compressZstd(const char * data, size_t size, int compression_level = 1) {
         size_t compressedSize = ZSTD_compressBound(size);
+        // ZSTD_CCtx* cctx = ZSTD_createCCtx();
+        // if(cctx == NULL) {
+        //     std::cerr << "Failed to create ZSTD_CCtx\n";
+        //     exit(1);
+        // }
+        // if (ZSTD_isError(ZSTD_CCtx_setParameter(cctx, ZSTD_c_nbWorkers, 8))) {
+        //     std::cout << "Failed to set worker threads\n";
+        //     exit(1);
+        // }
         std::string compressed(compressedSize, '\0');
         compressedSize = ZSTD_compress(compressed.data(), compressedSize, data, size, compression_level);
+        // compressedSize = ZSTD_compressCCtx(cctx, compressed.data(), compressedSize, data, size, compression_level);
+        // ZSTD_freeCCtx(cctx);
         return std::string(compressed.data(), compressedSize);
     }
 
