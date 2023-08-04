@@ -3,19 +3,8 @@
 #include "s3.h"
 
 std::tuple<size_t, std::vector<size_t>, std::vector<size_t>, std::vector<size_t>> read_metadata_from_s3(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetObjectRequest& object_request) {
-    Aws::S3::Model::HeadObjectRequest head_object_request;
-    head_object_request.WithBucket(object_request.GetBucket()).WithKey(object_request.GetKey());
-    auto head_object_outcome = s3_client.HeadObject(head_object_request);
-    size_t file_size;
-    if (head_object_outcome.IsSuccess())
-    {
-        file_size = head_object_outcome.GetResult().GetContentLength();
-    }
-    else
-    {
-        std::cout << "Error: " << head_object_outcome.GetError().GetMessage() << std::endl;
-        exit(1);
-    }
+    
+    size_t file_size = get_object_size(s3_client, object_request);
     size_t compressed_offsets_byte_offset;
     size_t compressed_level_offsets_byte_offset;
     size_t compressed_C_byte_offset;
