@@ -15,6 +15,7 @@
 #define ALPHABET 256
 
 #define B (1024 * 1024)
+#define ROW_GROUP_SIZE 320000
 
 void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const wavelet_tree_t & wavelet_tree)
 {
@@ -77,6 +78,7 @@ int main(int argc, const char *argv[1]) {
         }
 
         std::cout << "detected " << newlines.size() << " logs " << std::endl;
+        std::cout << "Row group size " << ROW_GROUP_SIZE << std::endl;
         std::cout << newlines[newlines.size() - 1] << std::endl;
         
         std::vector<size_t> total_chars(ALPHABET, 0);
@@ -87,7 +89,7 @@ int main(int argc, const char *argv[1]) {
         log_idx[0] = newlines[newlines.size() - 2];
 
         // get the second to last element of newlines, since the last element is always the length of the file assuming file ends with "\n"
-
+        FILE *debug_fp = fopen("logidx.log", "w");
         std::vector<char> last_chars = {Text[n - 1]};
         for(int i = 0; i < n; ++i) {
             // printf("%c\n", Text[SA[i] - 1]);
@@ -107,8 +109,12 @@ int main(int argc, const char *argv[1]) {
                 }
                 mid = (start + end) / 2;
             }
-            log_idx[i + 1] = newlines[start - 1];
+            // log_idx[i + 1] = newlines[start - 1] / ROW_GROUP_SIZE;
+            log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
+            // std::cout << log_idx[i + 1] << std::endl;
+            // fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
         }
+        fclose(debug_fp);
 
         for(int i = 0; i < ALPHABET; i++) {
             for(int j = 0; j < i; j ++)
