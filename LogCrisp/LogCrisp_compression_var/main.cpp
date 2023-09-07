@@ -71,7 +71,7 @@ int segStart = 0, lineStart = 0, failLine = 0, nowLine = 0;
 //map<int, StaticPattern*> st_store; // Eid to StaticPattern
 //map<int, RuntimePattern*> rp_store; // VarNumber to RuntimePattern
 //map<int, Coffer*> cf_store; // VarNumber to Coffer
-const char* delim = " \t:=,[]";
+constexpr const char* delim = " \t:=,[]";
 //const char* sdelim = (char*)" \t:=,[]\n";
 int len_start[MAX_TEMPLATE];
 int len_offset[MAX_TEMPLATE];
@@ -81,7 +81,7 @@ int stlen_start[MAX_SEGLEN];
 int stlen_cnt[MAX_SEGLEN];
 
 //return length of file data, -1 or 0: open file failed 
-int LoadFileToMem(const char *varname, char **mbuf)
+inline int LoadFileToMem(const char *varname, char **mbuf)
 {
 	int fd = open(varname,O_RDONLY);
 	int len =0;
@@ -466,7 +466,7 @@ void matchLine(char* mbuf, int pos, int * eidCount, int& maxSegSize, string outp
             	// tmp[i - lineStart] = '\0';
 				// SysDebug("Final match failed at %d, segSize: %d, buf: %s\n\n", eid, segSize, tmp);
 				//if(eid == -11) totDicOutlier++;
-		printf("Match Failed: %d\n", eid);
+		// printf("Match Failed: %d\n", eid);
 		
 		FILE* fout = fopen((output_path + ".outlier").c_str(), "a");
 		char* buffer = new char[pos - lineStart + 5];
@@ -483,6 +483,7 @@ void matchLine(char* mbuf, int pos, int * eidCount, int& maxSegSize, string outp
 		//SysDebug("Success Matched at %d\n\n", eid);
 		g_eid[nowLine] = eid;
 	}
+    
 	nowLine++;
 	maxSegSize = max(maxSegSize, segSize);
 	segSize = 0;
@@ -513,20 +514,11 @@ void matchFile(char* mbuf, int len, int* eidCount, int& maxSegSize, int& maxSegL
 	}
 }
 
-void process(int largestCapsule, string now_input_path, string now_output_path, int* eidCount, int compress_level, string zip_mode){
-	char* mbuf = NULL;
-
+void process_in_mem(int largestCapsule, char* mbuf, int len, string now_output_path, int* eidCount, int compress_level, string zip_mode, int prefix){
+	
 	for(int i = 0; i < largestCapsule; i++){
 		cf_store[i] = NULL;
 	}
-
-	printf("Start to process: %s, output path: %s \n", now_input_path.c_str(), now_output_path.c_str());
-	int len = LoadFileToMem(now_input_path.c_str(), &mbuf);
-	if(len <= 0){
-		printf("Load input file failed: %s\n", now_input_path.c_str());
-		return;
-	}
-
 		
 	n_pointer = 0, e_pointer = 0, segSize = 0, segStart = 0, lineStart = 0, failLine = 0, nowLine = 0;
 	cf_store[VAR_TYPE_OUTLIER] = new Coffer(VAR_TYPE_OUTLIER, len);
@@ -574,7 +566,7 @@ void process(int largestCapsule, string now_input_path, string now_output_path, 
 	for(int i = 0; i < largestCapsule; i++){
 		if(cf_store[i] == NULL) continue;
 		int Eid = (cf_store[i] ->varName >> POS_TEMPLATE);
-		cf_store[i] ->copy(mbuf, g_mem, g_entry, eidCount[Eid]);
+		cf_store[i] ->copy(mbuf, g_mem, g_entry, eidCount[Eid], prefix);
 		if(cf_store[i] ->srcLen > 0) capsuleCount++;
 	}
 	double cptime = ___StatTime_End(cptime_s);
@@ -596,11 +588,11 @@ void process(int largestCapsule, string now_input_path, string now_output_path, 
 
 		//printf("cf_size: %d, %d\n", cf_store.size(), (cf_store.find(805974016) == cf_store.end()));
     	//4). Compression Capsule and write
-	printf("Start compress!\n");
-	timeval ctime_s = ___StatTime_Start();
-	compress(now_output_path + ".zst", zip_mode,  compress_level, largestCapsule, capsuleCount);
-	double ctime = ___StatTime_End(ctime_s);
-	printf("Compress cost: %fs\n", ctime);
+	// printf("Start compress!\n");
+	// timeval ctime_s = ___StatTime_Start();
+	// compress(now_output_path + ".zst", zip_mode,  compress_level, largestCapsule, capsuleCount);
+	// double ctime = ___StatTime_End(ctime_s);
+	// printf("Compress cost: %fs\n", ctime);
 		// for(auto iit: st_store){
 		// 	delete iit.second;
 		// }
@@ -613,105 +605,215 @@ void process(int largestCapsule, string now_input_path, string now_output_path, 
 		// }
 }
 
-// ./Compressor -I ../Hadoop_0.log -O ../Hadoop_0 -T ../LogTemplate/Hadoop
-int main(int argc, char *argv[]){
+void process(int largestCapsule, string now_input_path, string now_output_path, int* eidCount, int compress_level, string zip_mode, int prefix){
+    
+    char* mbuf = NULL;
+    printf("Start to process: %s, output path: %s \n", now_input_path.c_str(), now_output_path.c_str());
+	int len = LoadFileToMem(now_input_path.c_str(), &mbuf);
+	if(len <= 0){
+		printf("Load input file failed: %s\n", now_input_path.c_str());
+		return;
+	}
+    process_in_mem(largestCapsule, mbuf, len, now_output_path, eidCount, compress_level, zip_mode, prefix);
+}
+// ./Compressor -I ../Hadoop_0.log -O ../Hadoop_0 -T ../LogTemplate/Hadoop -P <variable_prefix>
+// int main(int argc, char *argv[]){
+
+// 	// clock_t start = clock();
+// 	int o;
+// 	const char *optstring = "HhI:O:T:P:Z:L:X:Y:";
+// 	srand(4);
+// 	//Input Content
+// 	string input_path; string output_path;
+//     string template_path;
+// 	string compression_level_org;
+// 	int compression_level;
+// 	string zip_mode;
+// 	int startFile = -1;
+// 	int endFile = -1;
+// 	int prefix = 0;
+
+//     //Input A.log -> A.zst use
+// 	while ((o = getopt(argc, argv, optstring)) != -1)
+// 	{
+// 		switch (o)
+// 		{
+// 		case 'I':
+// 			input_path = optarg;
+// 			//strcpy(input,optarg);
+// 			printf("input file path: %s\n", input_path.c_str()); //clove++ 20200919: path
+// 			break;
+// 		case 'O':
+// 			output_path = optarg;
+// 			printf("output path : %s\n", output_path.c_str());
+// 			break;
+// 		case 'T':
+// 			template_path = optarg;
+// 			printf("template path: %s\n", template_path.c_str());
+// 			break;
+// 		case 'P':
+// 			prefix = atoi(optarg);
+// 			printf("variable prefix: %d", prefix);
+// 		case 'L':
+// 			compression_level_org = optarg;
+// 			printf("compression level org: %s\n", compression_level_org.c_str());
+// 			break;
+//         	case 'Z':
+// 			zip_mode = optarg;
+// 			printf("zip mode: %s\n", zip_mode.c_str());
+// 			break;
+// 		case 'X':
+// 			startFile = atoi(optarg);
+// 			printf("start from: %d.log\n", startFile);
+// 			break;
+// 		case 'Y':
+// 			endFile = atoi(optarg);
+// 			printf("end at: %d.log\n", endFile);
+// 			break;
+// 		case 'h':
+// 		case 'H':
+// 			printf("-I input path\n");
+// 			printf("-O output path\n");
+// 			printf("-T template path\n");
+// 			printf("-L compression_level\n");
+// 			printf("-Z compression_mode(Z or O)\n");
+//             return 0;
+// 			break;
+// 		case '?':
+// 			printf("error:wrong opt!\n");
+// 			printf("error optopt: %c\n", optopt);
+// 			printf("error opterr: %c\n", opterr);
+// 			return 1;
+// 		}
+// 	}
+	
+// 	//Basic input check
+// 	if (input_path == ""){
+// 		printf("No input file use default ../Hadoop_0.log\n");
+// 		input_path = "../Hadoop_0.log";
+// 	}
+	
+// 	if (output_path == ""){
+// 		printf("No output use default ../Hadoop_0\n");
+// 		output_path = "../Hadoop_0";
+// 	}
+//     if (template_path == ""){
+//         printf("No template use default ../LogTemplate/Hadoop_n\n");
+// 		template_path = "../LogTemplate/Hadoop";
+//     }
+	
+// 	if (compression_level_org == ""){
+// 		compression_level = 10;
+// 	}else{
+// 		compression_level = atoi(compression_level_org.c_str());
+// 	}
+// 	if (zip_mode == ""){
+// 		zip_mode = "O";
+// 	}
+// 	if (zip_mode == "ZA"){
+// 		if(startFile == -1 || endFile == -1){
+// 			printf("error: No file range\n");
+// 			return -1;
+// 		}
+// 	}
+
+
+// 	ProfilerStart("LogCrisp.prof");
+//     string staticPattern_path = template_path + ".templates";
+//     string runtimePattern_path = template_path + ".variables";
+// 	string tag_path = template_path + ".tags";
+
+// 	//TODO:
+// 	//1). Load staticPattern -> staticPatternTree
+//     int largestEid = loadStaticPattern(staticPattern_path);
+// 	int largestRm = 0;
+	
+// 	// for(int i = 1; i <= largestEid; i++){
+// 	// 	printf("i: %d, st_cnt[i]: %d\n", i, st_start[i]);
+// 	// }
+// 	for(int i = 0; i <= largestEid; i++){
+// 		if(st_start[i] == -1) continue;
+// 		int st_cnt = st_start[i];
+// 		st_start[i] = largestRm;
+// 		//printf("i: %d, st_start[i]: %d\n", i, st_start[i]);
+// 		largestRm += st_cnt;
+// 	}
+// 	//Output static pattern
+	
+// 	if(zip_mode != "Z" && zip_mode != "ZA"){
+// 		FILE* sout = fopen("./sta.txt", "w");
+// 		for(int i = 0; i < MAX_TEMPLATE; i++){
+// 			if(st_store[i] == NULL) continue;
+// 			fprintf(sout, "E%d %s\n", st_store[i] ->Eid, (st_store[i]->output()).c_str());
+// 		}
+// 		fclose(sout);
+// 	}
+
+
+//     //2). Load runtimePattern -> patternMap(int -> <runtimtPattern>)
+//     int largestRuntimePos = loadRuntimePattern(runtimePattern_path);
+// 	largestRuntimePos++;
+// 	int largestCpausle = 8;
+// 	for(int i = 0; i < largestRuntimePos; i++){
+// 		if(rp_store[i] == NULL) continue;
+// 		int rp_cnt = rp_start[i];
+// 		rp_start[i] = largestCpausle;
+// 		largestCpausle += rp_cnt;
+// 	}
+
+// 	//Output runtime pattern
+// 	if(zip_mode != "Z" && zip_mode != "ZA"){
+// 		FILE* tout = fopen("./var.txt", "w");
+// 		for(int i = 0; i < largestRuntimePos; i++){
+// 			if(rp_store[i] == NULL) continue;
+// 			fprintf(tout, "%d %s\n", rp_store[i] ->varName, (rp_store[i]->output()).c_str());
+// 		}
+// 		fclose(tout);
+// 	}
+
+// 	string * input_path_array;
+// 	string * output_path_array;
+// 	int arraySize = 1;
+// 	if(zip_mode != "ZA"){
+// 		input_path_array = new string[1];
+// 		output_path_array = new string[1];
+// 		input_path_array[0] = input_path;
+// 		output_path_array[0] = output_path;
+// 	}else{
+// 		input_path_array = new string[endFile - startFile];
+// 		output_path_array = new string[endFile - startFile];
+// 		arraySize = endFile - startFile;
+// 		for(int i = startFile; i < endFile; i++){
+// 			input_path_array[i - startFile] = input_path + to_string(i) + ".log";
+// 			output_path_array[i - startFile] = output_path + to_string(i);
+// 		}
+// 	}
+	
+// 	int * eidCount = new int[MAX_TEMPLATE];
+// 	//3). Matching and Building Capsule
+// 	for(int ss = 0; ss < arraySize; ss++){
+// 		process(largestCpausle, input_path_array[ss], output_path_array[ss], eidCount, compression_level, zip_mode, prefix);
+// 	}
+
+// 	// for(auto iit: st_index){
+// 	// 	delete[] iit.second;
+// 	// }
+// 	ProfilerStop();
+// } 
+
+extern "C" int compressor_wrapper(std::string& chunk, std::string output_path, std::string template_path, int prefix) {
 
 	// clock_t start = clock();
-	int o;
-	const char *optstring = "HhI:O:T:Z:L:X:Y:";
 	srand(4);
-	//Input Content
-	string input_path; string output_path;
-    string template_path;
-	string compression_level_org;
-	int compression_level;
-	string zip_mode;
+	int compression_level = 10;
+	string zip_mode = "O";
 	int startFile = -1;
 	int endFile = -1;
-
-    //Input A.log -> A.zst use
-	while ((o = getopt(argc, argv, optstring)) != -1)
-	{
-		switch (o)
-		{
-		case 'I':
-			input_path = optarg;
-			//strcpy(input,optarg);
-			printf("input file path: %s\n", input_path.c_str()); //clove++ 20200919: path
-			break;
-		case 'O':
-			output_path = optarg;
-			printf("output path : %s\n", output_path.c_str());
-			break;
-		case 'T':
-			template_path = optarg;
-			printf("template path: %s\n", template_path.c_str());
-			break;
-		case 'L':
-			compression_level_org = optarg;
-			printf("compression level org: %s\n", compression_level_org.c_str());
-			break;
-        case 'Z':
-			zip_mode = optarg;
-			printf("zip mode: %s\n", zip_mode.c_str());
-			break;
-		case 'X':
-			startFile = atoi(optarg);
-			printf("start from: %d.log\n", startFile);
-			break;
-		case 'Y':
-			endFile = atoi(optarg);
-			printf("end at: %d.log\n", endFile);
-			break;
-		case 'h':
-		case 'H':
-			printf("-I input path\n");
-			printf("-O output path\n");
-			printf("-T template path\n");
-			printf("-L compression_level\n");
-			printf("-Z compression_mode(Z or O)\n");
-            return 0;
-			break;
-		case '?':
-			printf("error:wrong opt!\n");
-			printf("error optopt: %c\n", optopt);
-			printf("error opterr: %c\n", opterr);
-			return 1;
-		}
-	}
 	
 	//Basic input check
-	if (input_path == ""){
-		printf("No input file use default ../Hadoop_0.log\n");
-		input_path = "../Hadoop_0.log";
-	}
-	
-	if (output_path == ""){
-		printf("No output use default ../Hadoop_0\n");
-		output_path = "../Hadoop_0";
-	}
-    if (template_path == ""){
-        printf("No template use default ../LogTemplate/Hadoop_n\n");
-		template_path = "../LogTemplate/Hadoop";
-    }
-	
-	if (compression_level_org == ""){
-		compression_level = 10;
-	}else{
-		compression_level = atoi(compression_level_org.c_str());
-	}
-	if (zip_mode == ""){
-		zip_mode = "O";
-	}
-	if (zip_mode == "ZA"){
-		if(startFile == -1 || endFile == -1){
-			printf("error: No file range\n");
-			return -1;
-		}
-	}
+	assert(chunk != "" && output_path != "" && template_path != "");
 
-
-	ProfilerStart("LogCrisp.prof");
+	// ProfilerStart("LogCrisp.prof");
     string staticPattern_path = template_path + ".templates";
     string runtimePattern_path = template_path + ".variables";
 	string tag_path = template_path + ".tags";
@@ -731,17 +833,6 @@ int main(int argc, char *argv[]){
 		//printf("i: %d, st_start[i]: %d\n", i, st_start[i]);
 		largestRm += st_cnt;
 	}
-	//Output static pattern
-	
-	if(zip_mode != "Z" && zip_mode != "ZA"){
-		FILE* sout = fopen("./sta.txt", "w");
-		for(int i = 0; i < MAX_TEMPLATE; i++){
-			if(st_store[i] == NULL) continue;
-			fprintf(sout, "E%d %s\n", st_store[i] ->Eid, (st_store[i]->output()).c_str());
-		}
-		fclose(sout);
-	}
-
 
     //2). Load runtimePattern -> patternMap(int -> <runtimtPattern>)
     int largestRuntimePos = loadRuntimePattern(runtimePattern_path);
@@ -753,43 +844,14 @@ int main(int argc, char *argv[]){
 		rp_start[i] = largestCpausle;
 		largestCpausle += rp_cnt;
 	}
-
-	//Output runtime pattern
-	if(zip_mode != "Z" && zip_mode != "ZA"){
-		FILE* tout = fopen("./var.txt", "w");
-		for(int i = 0; i < largestRuntimePos; i++){
-			if(rp_store[i] == NULL) continue;
-			fprintf(tout, "%d %s\n", rp_store[i] ->varName, (rp_store[i]->output()).c_str());
-		}
-		fclose(tout);
-	}
-
-	string * input_path_array;
-	string * output_path_array;
-	int arraySize = 1;
-	if(zip_mode != "ZA"){
-		input_path_array = new string[1];
-		output_path_array = new string[1];
-		input_path_array[0] = input_path;
-		output_path_array[0] = output_path;
-	}else{
-		input_path_array = new string[endFile - startFile];
-		output_path_array = new string[endFile - startFile];
-		arraySize = endFile - startFile;
-		for(int i = startFile; i < endFile; i++){
-			input_path_array[i - startFile] = input_path + to_string(i) + ".log";
-			output_path_array[i - startFile] = output_path + to_string(i);
-		}
-	}
 	
 	int * eidCount = new int[MAX_TEMPLATE];
-	//3). Matching and Building Capsule
-	for(int ss = 0; ss < arraySize; ss++){
-		process(largestCpausle, input_path_array[ss], output_path_array[ss], eidCount, compression_level, zip_mode);
-	}
-
+	
+	process_in_mem(largestCpausle, &chunk[0], chunk.size(), output_path, eidCount, compression_level, zip_mode, prefix);
+	
+    return 0;
 	// for(auto iit: st_index){
 	// 	delete[] iit.second;
 	// }
-	ProfilerStop();
+	// ProfilerStop();
 } 

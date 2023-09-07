@@ -116,10 +116,10 @@ class Coffer{
 
         int readFile(FILE* zipFile, int fstart, string compression_method); //Read to cdata
 
-        int copy(char* mbuf, int* g_mem, int * g_entry, int totSize);
+        int copy(char* mbuf, int* g_mem, int * g_entry, int totSize, int prefix);
         void copyEntry(char* mbuf, int* g_entry, int totSize);
         void copyInteger(char* mbuf, int* g_mem, int totSize);
-        void copyVar(char* mbuf, int* g_mem, int totSize);
+        void copyVar(char* mbuf, int* g_mem, int totSize, int prefix);
         void dicInit();
         int getIdx(int value);
 

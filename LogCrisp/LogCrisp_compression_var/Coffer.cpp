@@ -742,7 +742,7 @@ void Coffer::copyInteger(char* mbuf, int *g_mem, int totSize){
         assert(srcLen == nowOffset);
 }
 
-void Coffer::copyVar(char* mbuf, int* g_mem, int totSize){ //Dictionary, non-integer
+void Coffer::copyVar(char* mbuf, int* g_mem, int totSize, int prefix){ //Dictionary, non-integer
         //printf("varName: %d, eleLen: %d, lines: %d\n", varName, eleLen, lines);
         data = new Byte[eleLen * lines + 5];
         memset(data, ' ', eleLen * lines); //Padding
@@ -789,8 +789,8 @@ void Coffer::copyVar(char* mbuf, int* g_mem, int totSize){ //Dictionary, non-int
         int templateID = varName >> POS_TEMPLATE;
         int varID = varName >> POS_VAR & 0xff;
         string fileName = "E" + to_string(templateID) + "_V" + to_string(varID);
-        FILE* fw = fopen(("./variable/" + fileName).c_str(), "w");
-        string tagPath = "./variable_tag.txt";
+        FILE* fw = fopen(("./variable_" + std::to_string(prefix) + "/" + fileName).c_str(), "w");
+        string tagPath = "./variable_" + std::to_string(prefix) + "_tag.txt";
         FILE* ftag = fopen(tagPath.c_str(), "a");
         char* buffer = new char[1000000];
         //printf("varName: %d, eleLen: %d, lines: %d, n_pointer: %d, nowOffset: %d\n", varName, eleLen, lines, n_pointer, nowOffset);
@@ -823,7 +823,7 @@ void Coffer::copyVar(char* mbuf, int* g_mem, int totSize){ //Dictionary, non-int
         assert(srcLen == nowOffset);
 }
 
-int Coffer::copy(char* mbuf, int* g_mem, int * g_entry,int totSize){
+int Coffer::copy(char* mbuf, int* g_mem, int * g_entry,int totSize, int prefix){
     
     if(type == VAR_TYPE_ENTRY){
         copyEntry(mbuf, g_entry, totSize);
@@ -837,7 +837,7 @@ int Coffer::copy(char* mbuf, int* g_mem, int * g_entry,int totSize){
         //printf("here varName: %d, fieldType: %u\n", varName, fieldType);
         copyInteger(mbuf, g_mem, totSize);
     }else{ //Common coffer, (svar, dic)
-        copyVar(mbuf, g_mem, totSize);
+        copyVar(mbuf, g_mem, totSize, prefix);
     }
     return 0;
 }

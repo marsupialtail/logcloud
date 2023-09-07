@@ -27,7 +27,11 @@ LIBPATH = -L ../gperftools-gperftools-2.7/libs
 start:$(OBJS)
 	$(cc) $(OBJS) $(LIB) -o $(EXEC) $(LIBPATH) $(LIBS) 
 	rm -rf $(OBJS)
+
+linked:$(OBJS)
+	ld -r $(OBJS) -o $(EXEC).o
+
 .cpp.o:
-	$(cc) -c -O2 -I$(LIBDIR) -std=c++11 -g -Wall -o $@ -c $^ 
+	$(cc) -D_GLIBCXX_USE_CXX11_ABI=0  -c -O2 -I$(LIBDIR) -std=c++11 -g -Wall -o $@ -c $^ 
 clean:
 	rm -rf $(OBJS) $(EXEC)
