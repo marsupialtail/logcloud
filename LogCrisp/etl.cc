@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <cassert>
 
-const int CHUNKS = 28;
 const int DICT_NUM_THRESHOLD = 100;
 const int DICT_SAMPLE_CHUNKS = 5;
 const double DICT_CHUNK_RATIO_THRESHOLD = 0.6;
@@ -26,9 +25,9 @@ std::pair<int, int> variable_str_to_tup(const std::string &variable) {
     return {a, b};
 }
 
-std::vector<std::string> variable_to_paths(const std::pair<int, int> &variable, int chunks) {
+std::vector<std::string> variable_to_paths(size_t total_chunks, const std::pair<int, int> &variable, int chunks) {
     std::vector<std::string> result;
-    for (int i = 0; i < CHUNKS; ++i) {
+    for (int i = 0; i < total_chunks; ++i) {
         std::string path = "compressed/variable_" + std::to_string(i) + "/E" + std::to_string(variable.first) + "_V" + std::to_string(variable.second);
         std::ifstream file(path);
         if (file) {
@@ -41,8 +40,8 @@ std::vector<std::string> variable_to_paths(const std::pair<int, int> &variable, 
     return result;
 }
 
-std::map<int, std::vector<std::string>> sample_variable(const std::pair<int, int> &variable, int chunks = 2) {
-    auto paths = variable_to_paths(variable, chunks);
+std::map<int, std::vector<std::string>> sample_variable(size_t total_chunks, const std::pair<int, int> &variable, int chunks = 2) {
+    auto paths = variable_to_paths(total_chunks, variable, chunks);
     std::map<int, std::vector<std::string>> lines;
     int counter = 0;
 
@@ -67,12 +66,14 @@ std::string join(const std::vector<std::string>& vec, const std::string& delim) 
     return result;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+
+    size_t total_chunks = std::stoi(argv[1]);
 
     std::map<std::pair<int, int>, int> variable_to_type;
     std::map<int, std::set<std::pair<int, int>>> chunk_variables;
 
-    for (int chunk = 0; chunk < CHUNKS; ++chunk) {
+    for (int chunk = 0; chunk < total_chunks; ++chunk) {
         std::string variable_tag_file = "compressed/variable_" + std::to_string(chunk) + "_tag.txt";
         std::ifstream file(variable_tag_file);
         std::string line;
@@ -99,7 +100,7 @@ int main() {
     std::set<std::string> dictionary_items;
 
     for (const auto &variable : variables) {
-        auto lines = sample_variable(variable, DICT_SAMPLE_CHUNKS);
+        auto lines = sample_variable(total_chunks, variable, DICT_SAMPLE_CHUNKS);
         std::vector<std::unordered_map<std::string, size_t>> counters = {};
         std::set<std::string> items;
 
@@ -123,7 +124,8 @@ int main() {
                 }
             }
 
-            if (num_times > DICT_NUM_THRESHOLD && static_cast<double>(num_chunks) / DICT_SAMPLE_CHUNKS > DICT_CHUNK_RATIO_THRESHOLD) {
+            // if (num_times > DICT_NUM_THRESHOLD && static_cast<double>(num_chunks) / DICT_SAMPLE_CHUNKS > DICT_CHUNK_RATIO_THRESHOLD) {
+            if (static_cast<double>(num_chunks) / DICT_SAMPLE_CHUNKS > DICT_CHUNK_RATIO_THRESHOLD) {
                 dictionary_items.insert(item);
             }
         }
@@ -174,7 +176,10 @@ int main() {
         }
     }
 
-    for (int chunk = 0; chunk < CHUNKS; ++chunk) {
+    std::string all_outliers = "";
+    std::vector<size_t> outlier_linenos = {};
+
+    for (int chunk = 0; chunk < total_chunks; ++chunk) {
         for (const auto &variable : variables) {
             if (chunk_variables[chunk].find(variable) != chunk_variables[chunk].end()) {
                 std::string filename = "compressed/variable_" + std::to_string(chunk) + "/E" 
@@ -185,59 +190,78 @@ int main() {
 
         std::ostringstream oss;
         oss << "compressed/chunk" << std::setw(4) << std::setfill('0') << chunk << ".eid";
-        std::string chunk_file = oss.str();
-        std::cout << "processing chunk file: " << chunk_file << std::endl;
+        std::string chunk_filename = oss.str();
+        std::cout << "processing chunk file: " << chunk_filename << std::endl;
 
-        std::ifstream infile(chunk_file);
+        // oss.str("");
+        // oss << "compressed/chunk" << std::setw(4) << std::setfill('0') << chunk << ".outlier";
+        // std::string outlier_filename = oss.str();
+
+        std::ifstream eid_file(chunk_filename);
+
         std::string line;
         std::vector<int> chunk_eids;
-        while (std::getline(infile, line)) {
+        while (std::getline(eid_file, line)) {
             chunk_eids.push_back(std::stoi(line));
         }
-        infile.close();
+        eid_file.close();
 
         for (int eid : chunk_eids) {
-            
-            if (eid_to_variables.find(eid) == eid_to_variables.end()) {
+
+            if (eid < 0) {
+                // this is an outlier. read a line from the outlier file
+                // std::string item;
+                // std::getline(outlier_file, item);
+                // all_outliers += item + "\n";
+                // outlier_linenos.push_back(current_line_number);
                 current_line_number++;
                 continue;
-            }
-            auto this_variables = eid_to_variables[eid];
-            std::map<int, std::vector<std::string>> type_vars;
+            } 
+            else if (eid_to_variables.find(eid) == eid_to_variables.end()) {
 
-            for (const auto &variable : this_variables) {
-                std::string item;
-                std::getline(*variable_files[variable], item);
+                // this template does not have variables, skip it
 
-                int t = (dictionary_items.find(item) != dictionary_items.end()) ? 0 : variable_to_type[variable];
+                current_line_number++;
+                continue;
+            } 
+            else {
+                auto this_variables = eid_to_variables[eid];
+                std::map<int, std::vector<std::string>> type_vars;
 
-                type_vars[t].push_back(item);
-            }
+                for (const auto &variable : this_variables) {
+                    std::string item;
+                    std::getline(*variable_files[variable], item);
 
-            for (const auto &entry : type_vars) {
-                int t = entry.first;
-                if (expanded_items.find(t) == expanded_items.end()) {
-                    expanded_items[t] = {};
-                    expanded_lineno[t] = {};
+                    int t = (dictionary_items.find(item) != dictionary_items.end()) ? 0 : variable_to_type[variable];
+
+                    type_vars[t].push_back(item);
                 }
-                expanded_items[t].insert(expanded_items[t].end(), entry.second.begin(), entry.second.end());
-                expanded_lineno[t].resize(expanded_lineno[t].size() + entry.second.size(), current_line_number);
-            }
 
-            if (DEBUG) {
                 for (const auto &entry : type_vars) {
                     int t = entry.first;
-                    
-                    (*type_files[t]) << join(entry.second, " ") << "\n";
-                    (*type_lineno_files[t]) << current_line_number << "\n";
+                    if (expanded_items.find(t) == expanded_items.end()) {
+                        expanded_items[t] = {};
+                        expanded_lineno[t] = {};
+                    }
+                    expanded_items[t].insert(expanded_items[t].end(), entry.second.begin(), entry.second.end());
+                    expanded_lineno[t].resize(expanded_lineno[t].size() + entry.second.size(), current_line_number);
                 }
-            }
 
-            current_line_number++;
+                if (DEBUG) {
+                    for (const auto &entry : type_vars) {
+                        int t = entry.first;
+                        
+                        (*type_files[t]) << join(entry.second, " ") << "\n";
+                        (*type_lineno_files[t]) << current_line_number << "\n";
+                    }
+                }
+
+                current_line_number++;
+            }
         }
 
         for (const int &t : touched_types) {
-            if ((expanded_items[t].size() > COMPACTION_WINDOW || chunk == CHUNKS - 1) && !expanded_items[t].empty()) {
+            if ((expanded_items[t].size() > COMPACTION_WINDOW || chunk == total_chunks - 1) && !expanded_items[t].empty()) {
                 // Sort expanded_items and expanded_lineno based on expanded_items
                 std::vector<std::pair<std::string, size_t>> paired;
                 for (size_t i = 0; i < expanded_items[t].size(); ++i) {
@@ -336,7 +360,6 @@ int main() {
             type_lineno_files[t]->close();
         }
     }
-
 
     return 0;
 }

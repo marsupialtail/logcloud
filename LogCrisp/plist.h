@@ -8,7 +8,7 @@ The layout of the serialized data chunk:
 - all the posting lists concatenated together
 - 8 bytes denoting the number of posting lists
 */
-
+#include <cassert>
 #include "../compressor.h"
 #include <vector>
 typedef uint32_t plist_size_t;
@@ -30,6 +30,7 @@ class PListChunk {
 
         // return a copy
         std::vector<plist_size_t> lookup(size_t key) {
+            assert(data_[key].size() > 0);
             return data_[key];
         }
     private:

@@ -4,7 +4,7 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 
-size_t get_object_size(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetObjectRequest& object_request)
+inline size_t get_object_size(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetObjectRequest& object_request)
 {
     Aws::S3::Model::HeadObjectRequest head_object_request;
     head_object_request.WithBucket(object_request.GetBucket()).WithKey(object_request.GetKey());
@@ -22,7 +22,7 @@ size_t get_object_size(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetOb
     return file_size;
 }
 
-std::vector<char> read_byte_range_from_S3(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetObjectRequest & object_request, size_t start, size_t end)
+inline std::vector<char> read_byte_range_from_S3(const Aws::S3::S3Client& s3_client, Aws::S3::Model::GetObjectRequest & object_request, size_t start, size_t end)
 {
     object_request.SetRange("bytes=" + std::to_string(start) + "-" + std::to_string(end));
     auto get_object_outcome = s3_client.GetObject(object_request);

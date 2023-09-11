@@ -11,7 +11,7 @@
 
 #include <arrow/api.h>
 #include <arrow/status.h>
-
+#include <arrow/memory_pool.h>
 #include <arrow/io/file.h>
 #include <parquet/arrow/writer.h>
 #include <parquet/properties.h>
@@ -131,6 +131,8 @@ arrow::Status RunMain(int argc, char** argv) {
     std::vector<std::string> samples = {};
 
     for (size_t f = 0; f < num_input_files; ++f) {
+
+        std::cout << "Processing file " << files[f] << "\n";
         
         // use a do while loop here else you are going to miss the last line. ChatGPT is still not smart enough.
         do {
@@ -156,18 +158,26 @@ arrow::Status RunMain(int argc, char** argv) {
                         }
                     }
 
-                    if (samples.size() < TOTAL_SAMPLE_LINES) {
-                        samples.push_back(log_str);
-                    } else {
-                        std::uniform_int_distribution<size_t> distribution(0, global_line_count ++);
-                        size_t j = distribution(generator);
-                        if (j < TOTAL_SAMPLE_LINES) {
-                            samples[j] = log_str;
+                    if (!trained) {
+                        if (samples.size() < TOTAL_SAMPLE_LINES) {
+                            samples.push_back(log_str);
+                        } else {
+                            std::uniform_int_distribution<size_t> distribution(0, global_line_count ++);
+                            size_t j = distribution(generator);
+                            if (j < TOTAL_SAMPLE_LINES) {
+                                samples[j] = log_str;
+                            }
                         }
                     }
 
                     current_chunk += log_str + "\n";
                     if (current_chunk.size() >= CHUNK_SIZE) {
+
+                        if (chunk_file_counter == 9998) {
+                            std::cerr << "Too many chunks. Exiting\n";
+                            return arrow::Status::Invalid("Too many chunks");
+                        }
+
                         if (! trained) {
                             std::ostringstream oss;
                             oss << chunk_files_prefix << std::setw(4) << std::setfill('0') << chunk_file_counter++;
@@ -231,6 +241,7 @@ arrow::Status RunMain(int argc, char** argv) {
             }
             trainer_wrapper(samples_str, "hadoop");
             trained = true;
+            samples.clear();
 
             // now you need to go process all the flushed chunks and delete them after
             for (size_t i = 0; i < chunk_file_counter; ++i) {
@@ -251,6 +262,9 @@ arrow::Status RunMain(int argc, char** argv) {
                 fs::remove_all("chunks");
             }
         }
+
+        arrow::MemoryPool* pool = arrow::default_memory_pool();
+        std::cout << "Current Arrow memory usage" << pool->bytes_allocated() << std::endl;
     
     }
 

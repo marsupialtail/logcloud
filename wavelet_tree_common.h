@@ -5,10 +5,11 @@
 #include <iostream>
 #include "compressor.h"
 #include <tuple>
+#include "vfr.h"
 
 #define ALPHABET 256
 #define LOG_ALPHABET 8
-#define CHUNK_BITS 32768
+#define CHUNK_BITS (32768)
 typedef std::vector<bool> bitvector_t;
 typedef std::vector<bitvector_t> wavelet_tree_t;
 

@@ -65,6 +65,9 @@ private:
 
     std::string decompressZstd(const std::string& compressedData) {
         size_t decompressedSize = ZSTD_getDecompressedSize(compressedData.c_str(), compressedData.size());
+        if (decompressedSize == -1) {
+            throw std::runtime_error("Decompression failed.");
+        }
         std::string decompressed(decompressedSize, '\0');
         decompressedSize = ZSTD_decompress(decompressed.data(), decompressedSize, compressedData.c_str(), compressedData.size());
         return std::string(decompressed.data(), decompressedSize);

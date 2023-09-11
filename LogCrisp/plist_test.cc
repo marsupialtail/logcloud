@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
         std::vector<plist_size_t> numbers;
         plist_size_t number;
         while (iss >> number) {
-            number = number / 100000;
+            number = number / 10000;
             if(numbers.size() > 0 && numbers.back() == number) {
                 continue;
             }
