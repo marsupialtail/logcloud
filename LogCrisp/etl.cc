@@ -16,6 +16,7 @@ const double DICT_CHUNK_RATIO_THRESHOLD = 0.6;
 const int ROW_GROUP_SIZE = 100000;
 const int COMPACTION_WINDOW = 1000000;
 const int OUTLIER_THRESHOLD = 1000;
+typedef std::pair<int, int> variable_t;
 
 std::pair<int, int> variable_str_to_tup(const std::string &variable) {
     std::istringstream iss(variable);
@@ -66,13 +67,9 @@ std::string join(const std::vector<std::string>& vec, const std::string& delim) 
     return result;
 }
 
-int main(int argc, char *argv[]) {
-
-    size_t total_chunks = std::stoi(argv[1]);
-
-    std::map<std::pair<int, int>, int> variable_to_type;
-    std::map<int, std::set<std::pair<int, int>>> chunk_variables;
-
+std::pair<std::map<variable_t, int>, std::map<int, std::set<variable_t>>> get_variable_info(int total_chunks) {
+    std::map<variable_t, int> variable_to_type;
+    std::map<int, std::set<variable_t>> chunk_variables;
     for (int chunk = 0; chunk < total_chunks; ++chunk) {
         std::string variable_tag_file = "compressed/variable_" + std::to_string(chunk) + "_tag.txt";
         std::ifstream file(variable_tag_file);
@@ -87,13 +84,21 @@ int main(int argc, char *argv[]) {
             chunk_variables[chunk].insert(variable);
         }
     }
+    return {variable_to_type, chunk_variables};
+}
+
+int main(int argc, char *argv[]) {
+
+    size_t total_chunks = std::stoi(argv[1]);
+
+    auto [variable_to_type, chunk_variables] = get_variable_info(total_chunks);
 
     for (const auto& [key, val] : variable_to_type) {
         std::cout << "(" << key.first << ", " << key.second << "): " << val << "; ";
     }
     std::cout << std::endl;
 
-    std::set<std::pair<int, int>> variables;
+    std::set<variable_t> variables;
     for (const auto& kv : variable_to_type) {
         variables.insert(kv.first);
     }
@@ -135,7 +140,7 @@ int main(int argc, char *argv[]) {
     std::cout << std::endl;
     std::cout << "DICTIONARY SIZE: " << dictionary_items.size() << std::endl;
 
-    std::map<int, std::vector<std::pair<int, int>>> eid_to_variables;
+    std::map<int, std::vector<variable_t>> eid_to_variables;
     std::set<int> touched_types = {0};
 
     for (const auto &variable : variables) {
@@ -154,7 +159,7 @@ int main(int argc, char *argv[]) {
 
     const int COMPACTION_WINDOW = 1000000;
     const bool DEBUG = false;
-    std::map<std::pair<int, int>, std::ifstream*> variable_files = {};
+    std::map<variable_t, std::ifstream*> variable_files = {};
 
     size_t current_line_number = 0;
 
@@ -180,12 +185,18 @@ int main(int argc, char *argv[]) {
     std::vector<size_t> outlier_linenos = {};
 
     for (int chunk = 0; chunk < total_chunks; ++chunk) {
-        for (const auto &variable : variables) {
-            if (chunk_variables[chunk].find(variable) != chunk_variables[chunk].end()) {
-                std::string filename = "compressed/variable_" + std::to_string(chunk) + "/E" 
-                                        + std::to_string(variable.first) + "_V" + std::to_string(variable.second);
-                variable_files[variable] = new std::ifstream(filename);
-            }
+        // for (const auto &variable : variables) {
+        //     if (chunk_variables[chunk].find(variable) != chunk_variables[chunk].end()) {
+        //         std::string filename = "compressed/variable_" + std::to_string(chunk) + "/E" 
+        //                                 + std::to_string(variable.first) + "_V" + std::to_string(variable.second);
+        //         variable_files[variable] = new std::ifstream(filename);
+        //     }
+        // }
+
+        for (const auto & variable: chunk_variables[chunk]) {
+            std::string filename = "compressed/variable_" + std::to_string(chunk) + "/E" 
+                                    + std::to_string(variable.first) + "_V" + std::to_string(variable.second);
+            variable_files[variable] = new std::ifstream(filename);
         }
 
         std::ostringstream oss;

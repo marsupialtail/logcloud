@@ -415,6 +415,8 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
             
         }
 
+        // write each wavelet_tree and log_idx combo to a different file
+
         for (int i = 0; i < buffers.size(); i ++){
             byte_offsets.push_back(ftell(fp));
             write_wavelet_tree_to_disk(wavelet_trees[i].first, wavelet_trees[i].second, buffers[i].size(), fp);
@@ -549,8 +551,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
 
     // go through the groups
     std::set<size_t> chunks = {};
-
-    #pragma omp parallel for num_threads(8)
+    #pragma omp parallel for
     for (size_t i = type_offset; i < num_iters; i += 2) {
 
         size_t group_id = i / 2;
@@ -562,6 +563,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
         size_t wavelet_size = logidx_offset - wavelet_offset;
         size_t logidx_size = next_wavelet_offset - logidx_offset;
 
+        // note that each threads operates on a slice, which is a copy with own cursor. 
         VirtualFileRegion * wavelet_vfr  = vfr->slice(wavelet_offset, wavelet_size);
         VirtualFileRegion * logidx_vfr = vfr->slice(logidx_offset, logidx_size);
 
@@ -592,6 +594,8 @@ int main(int argc, char *argv[]) {
             processed_query += query[i];
         }
     }
+
+    std::cout << "query: " << processed_query << "\n";
     
     int query_type = get_type(processed_query.c_str());
     std::cout << "deduced type: " << query_type << "\n";

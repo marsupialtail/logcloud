@@ -29,9 +29,15 @@ void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const
 
 std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegion * log_idx_vfr, std::string query) {
     size_t log_idx_size = log_idx_vfr->size();
-    log_idx_vfr->vfseek(-sizeof(size_t), SEEK_END);
     size_t compressed_offsets_byte_offset;
+    
+    log_idx_vfr->vfseek(-sizeof(size_t), SEEK_END);
+    auto start_time = std::chrono::high_resolution_clock::now();
     log_idx_vfr->vfread(&compressed_offsets_byte_offset, sizeof(size_t));
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
+    std::cout << "log_idx decompress offsets took " << duration.count() << " milliseconds, this could choke for concurrent requests!" << std::endl;
+
     log_idx_vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
     Compressor compressor(CompressionAlgorithm::ZSTD);
     std::string compressed_offsets;
@@ -40,6 +46,7 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
     std::string decompressed_offsets = compressor.decompress(compressed_offsets);
     std::vector<size_t> chunk_offsets(decompressed_offsets.size() / sizeof(size_t));
     memcpy(chunk_offsets.data(), decompressed_offsets.data(), decompressed_offsets.size());
+    
 
     auto log_idx_lookup = [&chunk_offsets, log_idx_vfr] (size_t idx) {
         size_t chunk_offset = chunk_offsets[idx / B];

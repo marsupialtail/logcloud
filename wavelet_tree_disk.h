@@ -221,6 +221,7 @@ std::tuple<size_t, size_t, bitvector_t> read_chunk_from_file(VirtualFileRegion *
     std::string compressed_chunk;
     compressed_chunk.resize(end_byte - start_byte);
     vfr->vfread((void *)compressed_chunk.data(), compressed_chunk.size());
+
     Compressor compressor(CompressionAlgorithm::ZSTD);
     std::string decompressed_chunk = compressor.decompress(compressed_chunk);
     // auto decompressed_chunk = compressed_chunk;

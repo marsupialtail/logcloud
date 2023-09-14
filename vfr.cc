@@ -99,8 +99,8 @@ S3VirtualFileRegion::S3VirtualFileRegion(std::string bucket_name, std::string ob
     : bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(start) {
     Aws::Client::ClientConfiguration clientConfig;
     clientConfig.region = region;
-    clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    clientConfig.requestTimeoutMs = 10000; // 10 seconds
+    clientConfig.connectTimeoutMs = 1000; // 10 seconds
+    clientConfig.requestTimeoutMs = 1000; // 10 seconds
     s3_client_ = Aws::S3::S3Client(clientConfig);
     
     object_request_ = Aws::S3::Model::GetObjectRequest();
@@ -156,25 +156,27 @@ void S3VirtualFileRegion::reset() {
 }
 
 void S3VirtualFileRegion::vfread(void* buffer, size_t size) {
-
+    
     num_reads++;
     num_bytes_read += size;
 
-    // Aws::Client::ClientConfiguration clientConfig;
-    // clientConfig.region = region_;
-    // clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    // clientConfig.requestTimeoutMs = 10000; // 10 seconds
-    // Aws::S3::S3Client s3_client(clientConfig);
     Aws::S3::Model::GetObjectRequest object_request;
     object_request.WithBucket(bucket_name_).WithKey(object_name_);
 
     if (cursor_ + size > end_) {
         assert(false);
     }
+
+    
     // std::cout << object_request_.GetBucket() << " " << object_request_.GetKey() << " " << cursor_ << " " << size << std::endl;
     std::string argument = "bytes=" + std::to_string(cursor_) + "-" + std::to_string(cursor_ + size - 1);
+    // std::string argument = "bytes=" + std::to_string(cursor_) + "-" + std::to_string(cursor_ + 1000);
     object_request.SetRange(argument.c_str());
+    auto start_time = std::chrono::high_resolution_clock::now();
     auto get_object_outcome = s3_client_.GetObject(object_request);
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
+    std::cout << "s3 get took " << duration.count() << " milliseconds" << std::endl;
     assert(get_object_outcome.IsSuccess());
     auto &retrieved_data = get_object_outcome.GetResultWithOwnership().GetBody();
     retrieved_data.read(static_cast<char*>(buffer), size);
@@ -187,10 +189,10 @@ VirtualFileRegion* S3VirtualFileRegion::slice(size_t start, size_t length) {
     return new S3VirtualFileRegion(bucket_name_, object_name_, region_, start_ + start, length);
 }
 
-Aws::S3::S3Client S3VirtualFileRegion::CreateS3Client(const std::string& region) {
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = region;
-    clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    clientConfig.requestTimeoutMs = 10000; // 10 seconds
-    return Aws::S3::S3Client(clientConfig);
-}
+// Aws::S3::S3Client S3VirtualFileRegion::CreateS3Client(const std::string& region) {
+//     Aws::Client::ClientConfiguration clientConfig;
+//     clientConfig.region = region;
+//     clientConfig.connectTimeoutMs = 1000; // 10 seconds
+//     clientConfig.requestTimeoutMs = 1000; // 10 seconds
+//     return Aws::S3::S3Client(clientConfig);
+// }
