@@ -51,14 +51,14 @@ private:
     std::string region_;
     size_t cursor_;
 
-    Aws::S3::S3Client s3_client_;
+    const Aws::S3::S3Client& s3_client_;
     Aws::S3::Model::GetObjectRequest object_request_;
 
     Aws::S3::S3Client CreateS3Client(const std::string& region);
 
 public:
-    S3VirtualFileRegion(std::string bucket_name, std::string object_name, std::string region);
-    S3VirtualFileRegion(std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length);
+    S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region);
+    S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length);
     ~S3VirtualFileRegion();
     size_t size() const override;
     size_t object_size();

@@ -27,6 +27,8 @@ void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const
     }
 }
 
+#define GIVEUP 100
+
 std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegion * log_idx_vfr, std::string query) {
     size_t log_idx_size = log_idx_vfr->size();
     size_t compressed_offsets_byte_offset;
@@ -71,17 +73,23 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
 
     std::vector<size_t> matched_pos = {};
 
-    for (int i = start; i < end; i++) {
-        // this will make redundant freads for consecutive log_idx, but a half decent OS would cache it in RAM.
-        size_t pos = log_idx_lookup(i);
-        printf("log_idx %ld ", pos);
-        // now print the original text from bytes log_idx[i] to log_idx[i + 1]
-        matched_pos.push_back(pos);
+    if (end - start > GIVEUP) {
+        std::cout << "too many matches, giving up" << std::endl;
+        return {(size_t) -1};
+    } else {
+        for (int i = start; i < end; i++) {
+            // this will make redundant freads for consecutive log_idx, but a half decent OS would cache it in RAM.
+            size_t pos = log_idx_lookup(i);
+            printf("log_idx %ld ", pos);
+            // now print the original text from bytes log_idx[i] to log_idx[i + 1]
+            matched_pos.push_back(pos);
+        }
+        std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
+        std::cout << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+        wavelet_vfr->reset();
+        log_idx_vfr->reset();
     }
-    std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
-    std::cout << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
-    wavelet_vfr->reset();
-    log_idx_vfr->reset();
+
     return matched_pos;
 }
 
@@ -126,6 +134,8 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
     FILE *debug_fp = fopen("logidx.log", "w");
     std::vector<char> last_chars = {Text[n - 1]};
 
+    size_t average_bytes_per_line = n / newlines.size();
+
     auto start_time = std::chrono::high_resolution_clock::now();
     for(int i = 0; i < n; ++i) {
         // printf("%c\n", Text[SA[i] - 1]);
@@ -146,8 +156,20 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
         //     mid = (start + end) / 2;
         // }
 
+        // int my_guess = (SA[i] - 1) / average_bytes_per_line;
+        // // now only binary search a range around the guess
+        // int start = my_guess > 10000 ? my_guess - 10000 : 0;
+        // int end = std::min((int)newlines.size() - 1, my_guess + 10000);
+        // auto it = std::lower_bound(newlines.begin() + start, newlines.begin() + end, SA[i] - 1);
+
+        // // if not found
+        // if (it - newlines.begin() == end) {
+        //     it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
+        // }
+
         auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
-        auto mid = it - newlines.begin();
+
+        auto mid = it - newlines.begin() + 1;
 
         if (block_lines == -1) {
             log_idx[i + 1] = newlines[mid - 1];
@@ -159,7 +181,7 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
         
         // log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
         // std::cout << log_idx[i + 1] << std::endl;
-        // fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
+        fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
     }
     fclose(debug_fp);
 

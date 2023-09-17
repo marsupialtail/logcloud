@@ -79,13 +79,8 @@ void DiskVirtualFileRegion::reset() {
     fseek(file_, start_, SEEK_SET);
 }
 
-S3VirtualFileRegion::S3VirtualFileRegion(std::string bucket_name, std::string object_name, std::string region)
-    : bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(0) {
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = region;
-    clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    clientConfig.requestTimeoutMs = 10000; // 10 seconds
-    s3_client_ = Aws::S3::S3Client(clientConfig);
+S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region)
+    : s3_client_(s3_client), bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(0), cursor_(0) {
     
     object_request_ = Aws::S3::Model::GetObjectRequest();
     object_request_.WithBucket(bucket_name).WithKey(object_name);
@@ -95,13 +90,8 @@ S3VirtualFileRegion::S3VirtualFileRegion(std::string bucket_name, std::string ob
     size_ = end_ - start_;
 }
 
-S3VirtualFileRegion::S3VirtualFileRegion(std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length)
-    : bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(start) {
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = region;
-    clientConfig.connectTimeoutMs = 1000; // 10 seconds
-    clientConfig.requestTimeoutMs = 1000; // 10 seconds
-    s3_client_ = Aws::S3::S3Client(clientConfig);
+S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length)
+    : s3_client_(s3_client), bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(start), cursor_(start) {
     
     object_request_ = Aws::S3::Model::GetObjectRequest();
     object_request_.WithBucket(bucket_name).WithKey(object_name);
@@ -164,6 +154,7 @@ void S3VirtualFileRegion::vfread(void* buffer, size_t size) {
     object_request.WithBucket(bucket_name_).WithKey(object_name_);
 
     if (cursor_ + size > end_) {
+        std::cout << "cursor: " << cursor_ << " size: " << size << " end: " << end_ << std::endl;
         assert(false);
     }
 
@@ -186,7 +177,7 @@ VirtualFileRegion* S3VirtualFileRegion::slice(size_t start, size_t length) {
     if (start + length > end_) {
         assert(false);
     }
-    return new S3VirtualFileRegion(bucket_name_, object_name_, region_, start_ + start, length);
+    return new S3VirtualFileRegion(s3_client_, bucket_name_, object_name_, region_, start_ + start, length);
 }
 
 // Aws::S3::S3Client S3VirtualFileRegion::CreateS3Client(const std::string& region) {

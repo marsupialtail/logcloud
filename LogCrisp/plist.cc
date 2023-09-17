@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <filesystem>
+#include <numeric>
 #include <map>
 
 
@@ -51,7 +52,7 @@ int get_type(const char* query){
 std::vector<int> get_all_types(int type) {
     std::vector<int> types = {};
     for (int i = 1; i <= 63; ++i) {
-        if ((type & i) == i) {
+        if ((type & i) == type) {
             types.push_back(i);
         }
     }
@@ -90,6 +91,11 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
         type_order.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + i * sizeof(size_t)));
     }
 
+    // print out what are the types
+    for (int type : type_order) {
+        std::cout << type << "\n";
+    }
+
     // read the type offsets
     std::vector<size_t> type_offsets;
     for (size_t i = 0; i < num_types + 1; ++i) {
@@ -104,27 +110,43 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
 
     // figure out where in the type_order is query_type
     auto it = std::find(type_order.begin(), type_order.end(), query_type);
+    // if not found return empty vector
+    if (it == type_order.end()) {
+        return {};
+    }
+
     size_t type_index = std::distance(type_order.begin(), it);
     std::cout << "type index: " << type_index << "\n";
 
     size_t type_offset = type_offsets[type_index];  
+    size_t num_chunks = type_offsets.at(type_index + 1) - type_offset;
+
+    std::cout << "num chunks: " << num_chunks << "\n";
+    //print out chunks
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        std::cout << chunks[i] << "\n";
+    }
 
     // go through the blocks
     std::vector<plist_size_t> row_groups = {};
-    for (size_t i = 0; i < chunks.size(); ++i) {
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < std::min(chunks.size(), num_chunks); ++i) {
         size_t block_offset = block_offsets[type_offset + chunks[i]];
         size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
         size_t block_size = next_block_offset - block_offset;
-        std::cout << "block size: " << block_size << "\n";
+        // std::cout << "block size: " << block_size << "\n";
         // read the block
-        vfr->vfseek(block_offset, SEEK_SET);
+
+        VirtualFileRegion * local_vfr = vfr->slice(block_offset, block_size );
+        // vfr->vfseek(block_offset, SEEK_SET);
         std::string block;
         block.resize(block_size);
-        vfr->vfread(&block[0], block_size);
+        local_vfr->vfread(&block[0], block_size);
 
         // read the length of the compressed strings
         size_t compressed_strings_length = *reinterpret_cast<const size_t*>(block.data());
-        std::cout << "compressed strings length: " << compressed_strings_length << "\n";
+        // std::cout << "compressed strings length: " << compressed_strings_length << "\n";
 
         // read the compressed strings
         std::string compressed_strings = block.substr(sizeof(size_t), compressed_strings_length);
@@ -143,7 +165,10 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
             if (("\n" + line + "\n").find(query_str) != std::string::npos) {
                 // lookup the query string
                 std::vector<plist_size_t> result = plist.lookup(line_number);
-                row_groups.insert(row_groups.end(), result.begin(), result.end());
+                #pragma omp critical
+                {
+                    row_groups.insert(row_groups.end(), result.begin(), result.end());
+                }
             }
             ++line_number;
         }
@@ -330,7 +355,7 @@ Remember how the wavelet groups work. Each compacted_type variable is divided in
 Each chunk has a whole number of lines. Some of these chunks could be grouped into a group. A group is 100M, configurable
 */
 
-#define GROUP_BYTE_LIMIT 100000000
+#define GROUP_BYTE_LIMIT 500000000
 #define BRUTE_THRESHOLD 5
 
 void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::map<int, size_t> type_uncompressed_lines_in_block) {
@@ -354,7 +379,7 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
 
         std::string string_file_path = "compressed/compacted_type_" + std::to_string(type);
         std::ifstream string_file(string_file_path);
-        std::string buffer = "";
+        std::string buffer = "\n";
 
         std::string str_line;
         size_t lines_in_buffer = 0;
@@ -389,7 +414,12 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
                 chunks_in_buffer += 1;
                 if (chunks_in_group != -1 && chunks_in_buffer == chunks_in_group) {
 
-                    buffers.push_back(buffer);
+                    auto [wavelet_tree, log_idx, C] = bwt_and_build_wavelet(buffer.data(), uncompressed_lines_in_block);
+
+                    byte_offsets.push_back(ftell(fp));
+                    write_wavelet_tree_to_disk(wavelet_tree, C, buffer.size(), fp);
+                    byte_offsets.push_back(ftell(fp));
+                    write_log_idx_to_disk(log_idx, fp);
                     
                     buffer = "";
                     lines_in_buffer = 0;
@@ -397,31 +427,6 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
                     total_groups += 1;
                 }
             }
-        }
-
-        std::map<int, std::pair<wavelet_tree_t, std::vector<size_t>>> wavelet_trees = {};
-        std::map<int, std::vector<size_t>> log_idxes = {};
-
-        #pragma omp parallel for num_threads(4)
-        for (int i = 0; i < buffers.size(); i ++) {
-            
-            auto [wavelet_tree, log_idx, C] = bwt_and_build_wavelet(buffers[i].data(), uncompressed_lines_in_block);
-            
-        #pragma omp critical
-            {
-                wavelet_trees[i] = std::make_pair(wavelet_tree, C);
-                log_idxes[i] = log_idx;
-            }
-            
-        }
-
-        // write each wavelet_tree and log_idx combo to a different file
-
-        for (int i = 0; i < buffers.size(); i ++){
-            byte_offsets.push_back(ftell(fp));
-            write_wavelet_tree_to_disk(wavelet_trees[i].first, wavelet_trees[i].second, buffers[i].size(), fp);
-            byte_offsets.push_back(ftell(fp));
-            write_log_idx_to_disk(log_idxes[i], fp);
         }
 
         auto [wavelet_tree, log_idx, C] = bwt_and_build_wavelet(buffer.data(), uncompressed_lines_in_block);
@@ -521,7 +526,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
 
     // if not found return empty
     if (type_index == num_types) {
-        return {};
+        return {(size_t)-1};
     }
 
     std::vector<int> chunks_in_group;
@@ -541,7 +546,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
 
     // read the group offsets
     std::vector<size_t> group_offsets;
-    for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
+    for (size_t i = 0; i < num_groups * 2; ++i) {
         group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
         std::cout << "group offsets: " << group_offsets[i] << "\n";
     }    
@@ -553,6 +558,9 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     std::set<size_t> chunks = {};
     #pragma omp parallel for
     for (size_t i = type_offset; i < num_iters; i += 2) {
+
+        // delay this thread by a random number of seconds under 1 second
+        std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
 
         size_t group_id = i / 2;
         size_t group_chunk_offset = group_id * chunks_in_group_for_type;
@@ -573,7 +581,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
         #pragma omp critical
         {
             for (auto pos : matched_pos) {
-                std::cout << pos << "\n";
+                std::cout << "pos " << pos << "\n";
                 chunks.insert(group_chunk_offset + pos);
             }
         }
@@ -581,13 +589,8 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     return chunks;
 }
 
-int main(int argc, char *argv[]) {
+std::vector<size_t> search(std::string query) {
 
-    // auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu("hadoop");    
-    // write_hawaii("hadoop", type_chunks, type_uncompressed_lines_in_block);
-
-    std::string query = argv[1];
-    //remove newline characters from query, put it in a new string
     std::string processed_query = "";
     for (int i = 0; i < query.size(); i++) {
         if (query[i] != '\n') {
@@ -599,26 +602,73 @@ int main(int argc, char *argv[]) {
     
     int query_type = get_type(processed_query.c_str());
     std::cout << "deduced type: " << query_type << "\n";
+    std::vector<int> types_to_search = get_all_types(query_type);
 
     Aws::SDKOptions options;
     Aws::InitAPI(options);
-    
 
-    // std::set<size_t> result =  search_hawaii(new DiskVirtualFileRegion("hadoop.hawaii"), query_type, query);
-    std::set<size_t> result =  search_hawaii(new S3VirtualFileRegion("cluster-dump", "hadoop.hawaii", "us-west-2"), query_type, query);
-    for (size_t r : result) {
-        std::cout << r << "\n";
+    Aws::Client::ClientConfiguration clientConfig;
+    clientConfig.region = "us-west-2";
+    clientConfig.connectTimeoutMs = 10000; // 10 seconds
+    clientConfig.requestTimeoutMs = 10000; // 10 seconds
+    Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
+    
+    // print out types to search
+    for (int type: types_to_search) {
+        std::cout << "type to search: " << type << "\n";
     }
 
-    // convert result to a vector
-    std::vector<size_t> result_vec(result.begin(), result.end());
+    std::vector<size_t> results;
 
-    std::vector<plist_size_t> found = search_oahu(new S3VirtualFileRegion("cluster-dump", "hadoop.oahu", "us-west-2"), query_type , result_vec, query);
+    for (int type: types_to_search) {
 
-    for (plist_size_t r : found) {
-        std::cout << r << "\n";
+        std::cout << "searching type " << type << "\n";
+
+        // std::set<size_t> result =  search_hawaii(new DiskVirtualFileRegion("hadoop.hawaii"), type, query);
+        std::set<size_t> result =  search_hawaii(new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop_large.hawaii", "us-west-2"), type, query);
+        for (size_t r : result) {
+            std::cout << r << "\n";
+        }
+
+        if (result == std::set<size_t>{(size_t)-1}) {
+            std::cout << "type not found, brute forcing Oahu\n";
+            std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
+            std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
+            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop.oahu", "us-west-2");
+            // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
+            std::vector<plist_size_t> found = search_oahu(vfr_oahu, type , chunks_to_search, query);
+            for (plist_size_t r : found) {
+                std::cout << "result: " << r << "\n";
+            }
+        } else {
+            std::vector<size_t> result_vec(result.begin(), result.end());
+            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop.oahu", "us-west-2");
+            // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
+            std::vector<plist_size_t> found = search_oahu(vfr_oahu, type , result_vec, query);
+            for (plist_size_t r : found) {
+                std::cout << "result: " << r << "\n";
+                results.push_back(r);
+            }
+        }
     }
 
     Aws::ShutdownAPI(options);
+    return results;
+}
+
+int main(int argc, char *argv[]) {
+
+    std::string mode = argv[1];
+
+    if (mode == "index") {
+        auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu("hadoop");    
+        write_hawaii("hadoop", type_chunks, type_uncompressed_lines_in_block);
+    } else if (mode == "search") {
+        std::string query = argv[2];
+        std::vector<size_t> results = search(query);
+    } else {
+        std::cout << "Usage: " << argv[0] << " <mode> <optional:query>" << std::endl;
+        return 1;
+    }
 
 }

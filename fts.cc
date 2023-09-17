@@ -51,8 +51,8 @@ int main(int argc, const char *argv[1]) {
         const char * log_idx_filename = argv[4];
         const char * query = argv[5];
 
-        VirtualFileRegion wavelet_vfr(wavelet_filename);
-        VirtualFileRegion log_idx_vfr(log_idx_filename);
+        VirtualFileRegion * wavelet_vfr = new DiskVirtualFileRegion(wavelet_filename);
+        VirtualFileRegion * log_idx_vfr = new DiskVirtualFileRegion(log_idx_filename);
         auto matched_pos = search_disk(wavelet_vfr, log_idx_vfr, query);
 
         for (size_t pos : matched_pos) {
