@@ -48,19 +48,38 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
     std::string decompressed_offsets = compressor.decompress(compressed_offsets);
     std::vector<size_t> chunk_offsets(decompressed_offsets.size() / sizeof(size_t));
     memcpy(chunk_offsets.data(), decompressed_offsets.data(), decompressed_offsets.size());
-    
 
-    auto log_idx_lookup = [&chunk_offsets, log_idx_vfr] (size_t idx) {
-        size_t chunk_offset = chunk_offsets[idx / B];
-        log_idx_vfr->vfseek(chunk_offset, SEEK_SET);
-        std::string compressed_chunk;
-        compressed_chunk.resize(chunk_offsets[idx / B + 1] - chunk_offset);
-        log_idx_vfr->vfread((void *)compressed_chunk.data(), compressed_chunk.size());
-        Compressor compressor(CompressionAlgorithm::ZSTD);
-        std::string decompressed_chunk = compressor.decompress(compressed_chunk);
-        std::vector<size_t> chunk(decompressed_chunk.size() / sizeof(size_t));
-        memcpy(chunk.data(), decompressed_chunk.data(), decompressed_chunk.size());
-        return chunk[idx % B];
+    auto batch_log_idx_lookup = [&chunk_offsets, log_idx_vfr] (size_t start_idx, size_t end_idx){
+        size_t start_chunk_offset = chunk_offsets[start_idx / B];
+        size_t end_chunk_offset = chunk_offsets[end_idx / B + 1];
+        size_t total_chunks = end_idx / B - start_idx / B + 1;
+
+        log_idx_vfr->vfseek(start_chunk_offset, SEEK_SET);
+        std::string compressed_chunks;
+        compressed_chunks.resize(end_chunk_offset - start_chunk_offset);
+        log_idx_vfr->vfread((void *)compressed_chunks.data(), compressed_chunks.size());
+        
+        // this contains possibly multiple chunks! We need to decode them separately
+        std::vector<size_t> results = {};
+        for (int i = 0; i < total_chunks; i++) {
+            size_t chunk_offset = chunk_offsets[start_idx / B + i];
+            std::string compressed_chunk = compressed_chunks.substr(chunk_offset - start_chunk_offset, chunk_offsets[start_idx / B + i + 1] - chunk_offset);
+            compressed_chunk.resize(chunk_offsets[start_idx / B + i + 1] - chunk_offset);
+            Compressor compressor(CompressionAlgorithm::ZSTD);
+            std::string decompressed_chunk = compressor.decompress(compressed_chunk);
+            std::vector<size_t> log_idx(decompressed_chunk.size() / sizeof(size_t));
+            memcpy(log_idx.data(), decompressed_chunk.data(), decompressed_chunk.size());
+            // if this is the first chunk, skip to start_idx, if last chunk, stop and end_idx, otherwise add the entire chunk to the results
+            if (i == 0) {
+                results.insert(results.end(), log_idx.begin() + start_idx % B, std::min(log_idx.end(), end_idx % B + log_idx.begin()));
+            } else if (i == total_chunks - 1) {
+                results.insert(results.end(), log_idx.begin(), log_idx.begin() + end_idx % B);
+            } else {
+                results.insert(results.end(), log_idx.begin(), log_idx.end());
+            }
+        }
+        return results;
+
     };
 
     std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
@@ -73,19 +92,22 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
 
     std::vector<size_t> matched_pos = {};
 
-    if (end - start > GIVEUP) {
+    if ( start == -1 || end == -1) {
+        std::cout << "no matches" << std::endl;
+        return {(size_t) -1};
+    }
+
+    if (false) { //(end - start > GIVEUP) {
         std::cout << "too many matches, giving up" << std::endl;
         return {(size_t) -1};
     } else {
-        for (int i = start; i < end; i++) {
-            // this will make redundant freads for consecutive log_idx, but a half decent OS would cache it in RAM.
-            size_t pos = log_idx_lookup(i);
-            printf("log_idx %ld ", pos);
-            // now print the original text from bytes log_idx[i] to log_idx[i + 1]
-            matched_pos.push_back(pos);
-        }
-        std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
-        std::cout << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+        std::vector<size_t> pos = batch_log_idx_lookup(start, end);
+        // push pos to matched_pos
+        matched_pos.insert(matched_pos.end(), pos.begin(), pos.end());
+
+        // doesn't actually matter which vfr since these are static variables
+        std::cout << "num reads: " << log_idx_vfr->num_reads << std::endl;
+        std::cout << "num bytes read: " << log_idx_vfr->num_bytes_read << std::endl;
         wavelet_vfr->reset();
         log_idx_vfr->reset();
     }
@@ -167,9 +189,9 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
         //     it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
         // }
 
-        auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
+        auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] );
 
-        auto mid = it - newlines.begin() + 1;
+        auto mid = it - newlines.begin() ;
 
         if (block_lines == -1) {
             log_idx[i + 1] = newlines[mid - 1];

@@ -181,7 +181,7 @@ int write_kauai(std::string filename, int num_chunks) {
     byte_offsets.push_back(ftell(fp));
 
 
-    std::ifstream template_file("hadoop.templates");
+    std::ifstream template_file(filename + ".templates");
     std::map<size_t, std::string> templates = {};
     std::getline(template_file, line); // Read and discard the first line
 
@@ -432,8 +432,8 @@ int main(int argc, char* argv[]) {
     // first argument will be mode, which is either 'index' or 'search'. The second argument will be the number of chunks to index
     // or the string to search
 
-    if (argc != 3) {
-        std::cout << "Usage: " << argv[0] << " <mode> <num_chunks>" << std::endl;
+    if (argc != 4) {
+        std::cout << "Usage: " << argv[0] << " index <name> <num_chunks> or query <name> <query>" << std::endl;
         return 1;
     }
 
@@ -449,12 +449,12 @@ int main(int argc, char* argv[]) {
     Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
 
     if (mode == "index") {
-        size_t num_chunks = std::stoul(argv[2]);
-        write_kauai("hadoop", num_chunks);
+        size_t num_chunks = std::stoul(argv[3]);
+        write_kauai(argv[2], num_chunks);
     } else if (mode == "search") {
-        std::string query = argv[2];
+        std::string query = argv[3];
         // VirtualFileRegion * vfr = new DiskVirtualFileRegion("compressed/hadoop.kauai");
-        VirtualFileRegion * vfr = new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop.kauai", "us-west-2");
+        VirtualFileRegion * vfr = new S3VirtualFileRegion(s3_client, "cluster-dump", std::string(argv[2]) + ".kauai", "us-west-2");
         search_kauai(vfr, query);
     } else {
         std::cout << "Usage: " << argv[0] << " <mode> <num_chunks>" << std::endl;

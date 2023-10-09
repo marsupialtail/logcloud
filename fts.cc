@@ -55,6 +55,12 @@ int main(int argc, const char *argv[1]) {
         VirtualFileRegion * log_idx_vfr = new DiskVirtualFileRegion(log_idx_filename);
         auto matched_pos = search_disk(wavelet_vfr, log_idx_vfr, query);
 
+        // print out the matchd pos 
+
+        for (size_t pos : matched_pos) {
+            std::cout << pos << std::endl;
+        }
+
         for (size_t pos : matched_pos) {
             for (int j = pos + 1; j < pos + 1000; j++) {
                 printf("%c", Text[j]);

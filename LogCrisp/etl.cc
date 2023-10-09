@@ -89,7 +89,8 @@ std::pair<std::map<variable_t, int>, std::map<int, std::set<variable_t>>> get_va
 
 int main(int argc, char *argv[]) {
 
-    size_t total_chunks = std::stoi(argv[1]);
+    std::string filename = argv[1];
+    size_t total_chunks = std::stoi(argv[2]);
 
     auto [variable_to_type, chunk_variables] = get_variable_info(total_chunks);
 
@@ -184,6 +185,8 @@ int main(int argc, char *argv[]) {
     std::string all_outliers = "";
     std::vector<size_t> outlier_linenos = {};
 
+    FILE *fp = fopen(("compressed/" + filename + ".maui").c_str(), "wb");
+
     for (int chunk = 0; chunk < total_chunks; ++chunk) {
         // for (const auto &variable : variables) {
         //     if (chunk_variables[chunk].find(variable) != chunk_variables[chunk].end()) {
@@ -220,11 +223,7 @@ int main(int argc, char *argv[]) {
         for (int eid : chunk_eids) {
 
             if (eid < 0) {
-                // this is an outlier. read a line from the outlier file
-                // std::string item;
-                // std::getline(outlier_file, item);
-                // all_outliers += item + "\n";
-                // outlier_linenos.push_back(current_line_number);
+                // this is an outlier. outliers will be treated separately.
                 current_line_number++;
                 continue;
             } 

@@ -35,7 +35,7 @@ void compress_chunk(int chunk_file_counter, std::string& current_chunk, std::str
 
     // Check if the directory exists and remove it
     if (std::filesystem::exists(dirName)) {
-        std::filesystem::remove_all(dirName); // equivalent to shutil.rmtree in Python
+        std::filesystem::remove_all(dirName); 
     }
 
     // Create the directory
@@ -43,7 +43,7 @@ void compress_chunk(int chunk_file_counter, std::string& current_chunk, std::str
 
     // Check if the file exists and remove it
     if (std::filesystem::exists(tagName)) {
-        std::filesystem::remove(tagName); // Remove the file
+        std::filesystem::remove(tagName); 
     }
 
     std::ostringstream oss;

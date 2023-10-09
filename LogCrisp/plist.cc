@@ -439,6 +439,9 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
         groups_per_type[type] = total_groups;
 
     }
+
+    byte_offsets.push_back(ftell(fp));
+
     // print out groups per type
     for (auto item: groups_per_type) {
         std::cout << item.first << " " << item.second << "\n";
@@ -477,6 +480,16 @@ The layout of the compressed metadata page
 
     for (size_t byte_offset : byte_offsets) {
         metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
+    }
+
+    // print out type offsets
+    for (size_t type_offset : type_offsets) {
+        std::cout << type_offset << "\n";
+    }
+
+    // print out byte offsets
+    for (size_t byte_offset : byte_offsets) {
+        std::cout << byte_offset << "\n";
     }
 
     std::string compressed_metadata_page = Compressor(CompressionAlgorithm::ZSTD).compress(metadata_page.c_str(), metadata_page.size());
@@ -546,7 +559,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
 
     // read the group offsets
     std::vector<size_t> group_offsets;
-    for (size_t i = 0; i < num_groups * 2; ++i) {
+    for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
         group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
         std::cout << "group offsets: " << group_offsets[i] << "\n";
     }    
@@ -589,7 +602,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     return chunks;
 }
 
-std::vector<size_t> search(std::string query) {
+std::vector<size_t> search(std::string index_name, std::string query) {
 
     std::string processed_query = "";
     for (int i = 0; i < query.size(); i++) {
@@ -625,7 +638,7 @@ std::vector<size_t> search(std::string query) {
         std::cout << "searching type " << type << "\n";
 
         // std::set<size_t> result =  search_hawaii(new DiskVirtualFileRegion("hadoop.hawaii"), type, query);
-        std::set<size_t> result =  search_hawaii(new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop_large.hawaii", "us-west-2"), type, query);
+        std::set<size_t> result =  search_hawaii(new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".hawaii", "us-west-2"), type, query);
         for (size_t r : result) {
             std::cout << r << "\n";
         }
@@ -634,7 +647,7 @@ std::vector<size_t> search(std::string query) {
             std::cout << "type not found, brute forcing Oahu\n";
             std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
             std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
-            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop.oahu", "us-west-2");
+            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".oahu", "us-west-2");
             // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
             std::vector<plist_size_t> found = search_oahu(vfr_oahu, type , chunks_to_search, query);
             for (plist_size_t r : found) {
@@ -642,7 +655,7 @@ std::vector<size_t> search(std::string query) {
             }
         } else {
             std::vector<size_t> result_vec(result.begin(), result.end());
-            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", "hadoop.oahu", "us-west-2");
+            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".oahu", "us-west-2");
             // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
             std::vector<plist_size_t> found = search_oahu(vfr_oahu, type , result_vec, query);
             for (plist_size_t r : found) {
@@ -661,11 +674,13 @@ int main(int argc, char *argv[]) {
     std::string mode = argv[1];
 
     if (mode == "index") {
-        auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu("hadoop");    
-        write_hawaii("hadoop", type_chunks, type_uncompressed_lines_in_block);
+        std::string index_name = argv[2];
+        auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name);    
+        write_hawaii(index_name, type_chunks, type_uncompressed_lines_in_block);
     } else if (mode == "search") {
-        std::string query = argv[2];
-        std::vector<size_t> results = search(query);
+        std::string index_name = argv[2];
+        std::string query = argv[3];
+        std::vector<size_t> results = search(index_name, query);
     } else {
         std::cout << "Usage: " << argv[0] << " <mode> <optional:query>" << std::endl;
         return 1;

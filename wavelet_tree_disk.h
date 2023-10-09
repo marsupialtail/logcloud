@@ -169,6 +169,7 @@ std::tuple<size_t, size_t> search_wavelet_tree(const wavelet_tree_t & tree, std:
     }
     std::cout << "start: " << start << std::endl;
     std::cout << "end: " << end << std::endl;
+    std::cout << "range: " << end - start << std::endl;
     return std::make_tuple(start, end);
 }
 
@@ -284,16 +285,17 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
 
         start = C[c] + wavelet_tree_rank_from_file(vfr, level_offsets, offsets, c, start);
         end = C[c] + wavelet_tree_rank_from_file(vfr, level_offsets, offsets, c, end);
-        // std::cout << "start: " << start << std::endl;
-        // std::cout << "end: " << end << std::endl;
+        std::cout << "start: " << start << std::endl;
+        std::cout << "end: " << end << std::endl;
+        std::cout << "range: " << end - start << std::endl;
         if (start >= end) {
             std::cout << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
-        if (end - start < 10) {
-            std::cout << "early exit" << std::endl;
-            return std::make_tuple(start, end);
-        }
+        // if (end - start < 10) {
+        //     std::cout << "early exit" << std::endl;
+        //     return std::make_tuple(start, end);
+        // }
     }
 
     return std::make_tuple(start, end);
