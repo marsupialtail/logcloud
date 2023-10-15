@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
     std::string line;
     while (std::getline(inFile, line)) {
         // Check if the line doesn't start with "201"
-        if (line.substr(0, 3) != "201") {
+        if (line.substr(0, 4) != "- 11") {
             std::cout << line << "\n";
         }
     }
