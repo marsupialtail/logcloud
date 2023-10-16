@@ -1,1 +1,0 @@
-LD_LIBRARY_PATH=/home/ziheng/aws-sdk-cpp/build/lib/:/home/ziheng/libdivsufsort/build/lib/:/home/ziheng/miniconda3/envs/quokka-dev/lib/python3.8/site-packages/pyarrow ./rex big-logs/windows/* chunks windows 21 201
