@@ -10,7 +10,6 @@
 #include <sstream>
 #include <divsufsort.h>
 #include "wavelet_tree_disk.h"
-#include "wavelet_tree_s3.h"
 
 #define B (1024 * 1024)
 
@@ -71,13 +70,14 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
             memcpy(log_idx.data(), decompressed_chunk.data(), decompressed_chunk.size());
             // if this is the first chunk, skip to start_idx, if last chunk, stop and end_idx, otherwise add the entire chunk to the results
             if (i == 0) {
-                results.insert(results.end(), log_idx.begin() + start_idx % B, std::min(log_idx.end(), end_idx % B + log_idx.begin()));
+                results.insert(results.end(), log_idx.begin() + start_idx % B, std::min(log_idx.end(), end_idx + log_idx.begin()));
             } else if (i == total_chunks - 1) {
                 results.insert(results.end(), log_idx.begin(), log_idx.begin() + end_idx % B);
             } else {
                 results.insert(results.end(), log_idx.begin(), log_idx.end());
             }
         }
+
         return results;
 
     };
@@ -102,7 +102,6 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
         return {(size_t) -1};
     } else {
         std::vector<size_t> pos = batch_log_idx_lookup(start, end);
-        // push pos to matched_pos
         matched_pos.insert(matched_pos.end(), pos.begin(), pos.end());
 
         // doesn't actually matter which vfr since these are static variables
@@ -153,7 +152,7 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
     // get the second to last element of newlines, since the last element is always the length of the file assuming file ends with "\n"
     log_idx[0] = newlines[newlines.size() - 2];
 
-    FILE *debug_fp = fopen("logidx.log", "w");
+    // FILE *debug_fp = fopen("logidx.log", "w");
     std::vector<char> last_chars = {Text[n - 1]};
 
     size_t average_bytes_per_line = n / newlines.size();
@@ -203,9 +202,9 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
         
         // log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
         // std::cout << log_idx[i + 1] << std::endl;
-        fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
+        // fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
     }
-    fclose(debug_fp);
+    // fclose(debug_fp);
 
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);

@@ -13,12 +13,7 @@
 #include "compressor.h"
 #include <cerrno>
 #include <cstring>
-#include <arrow/api.h>
-#include <arrow/status.h>
-#include <arrow/memory_pool.h>
-#include <arrow/io/file.h>
-#include <parquet/arrow/writer.h>
-#include <parquet/properties.h>
+
 
 namespace fs = std::filesystem;
 
@@ -26,11 +21,11 @@ const int DICT_NUM_THRESHOLD = 100;
 const int DICT_SAMPLE_CHUNKS = 5;
 const double DICT_CHUNK_RATIO_THRESHOLD = 0.6;
 const double DICT_GROUP_RATIO_THRESHOLD = 0.6;
-const int ROW_GROUP_SIZE = 100000;
-const int ROW_GROUPS_PER_FILE = 10;
 const int COMPACTION_WINDOW = 1000000;
 const int OUTLIER_THRESHOLD = 1000;
 typedef std::pair<int, int> variable_t;
+const int ROW_GROUP_SIZE = 100000;
+
 
 std::pair<int, int> variable_str_to_tup(const std::string &variable) {
     std::istringstream iss(variable);
@@ -98,65 +93,9 @@ std::pair<std::map<variable_t, int>, std::map<int, std::set<variable_t>>> get_va
     return {variable_to_type, chunk_variables};
 }
 
-arrow::Status write_parquet_file(size_t group_number, std::string parquet_files_prefix, size_t& parquet_file_counter, std::shared_ptr<arrow::Table> & table) {
-
-    auto writer_properties = parquet::WriterProperties::Builder().compression(parquet::Compression::ZSTD)->build();
-    std::shared_ptr<arrow::Schema> schema = arrow::schema({
-        arrow::field("timestamp", arrow::utf8()),
-        arrow::field("log", arrow::utf8())
-    });
-    std::shared_ptr<arrow::Array> timestamp_array, log_array;
-    arrow::StringBuilder timestamp_builder, log_builder;
-    std::ifstream timestamp_file("compressed/" + std::to_string(group_number) + "/timestamp");
-    std::ifstream log_file("compressed/" + std::to_string(group_number) +"/log");
-    std::string timestamp_line, log_line;
-
-    while (std::getline(timestamp_file, timestamp_line) && std::getline(log_file, log_line)) {
-        ARROW_RETURN_NOT_OK(timestamp_builder.Append(timestamp_line));
-        ARROW_RETURN_NOT_OK(log_builder.Append(log_line));
-    }
-
-    ARROW_RETURN_NOT_OK(timestamp_builder.Finish(&timestamp_array));
-    ARROW_RETURN_NOT_OK(log_builder.Finish(&log_array));
-    std::shared_ptr<arrow::Table> this_table = arrow::Table::Make(schema, {timestamp_array, log_array});
-
-    if (table == nullptr) {
-        table = this_table;
-    } else {
-        ARROW_ASSIGN_OR_RAISE(table, arrow::ConcatenateTables({table, this_table}));
-    }
-
-    while (table->num_rows() >= ROW_GROUP_SIZE * ROW_GROUPS_PER_FILE) {
-        // Write the table to a parquet file
-        size_t write_lines = ROW_GROUP_SIZE * ROW_GROUPS_PER_FILE;
-        std::string parquet_filename = parquet_files_prefix + std::to_string(parquet_file_counter++) + ".parquet";
-        std::shared_ptr<arrow::io::FileOutputStream> outfile;
-        ARROW_ASSIGN_OR_RAISE(outfile, arrow::io::FileOutputStream::Open(parquet_filename));
-        ARROW_RETURN_NOT_OK(parquet::arrow::WriteTable(*(table->Slice(0, write_lines)), arrow::default_memory_pool(), outfile, ROW_GROUP_SIZE, writer_properties));
-        table = table->Slice(write_lines);
-    }
-
-    arrow::MemoryPool* pool = arrow::default_memory_pool();
-    std::cout << "Current Arrow memory usage" << pool->bytes_allocated() << std::endl;
-
-    return arrow::Status::OK();
-}
-
-arrow::Status RunMain(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
 
     std::string index_name = argv[1];
-
-    std::string parquet_files_prefix = "parquets/" + index_name;
-
-    if (fs::exists("parquets")) {
-        fs::remove_all("parquets" );
-    }
-    fs::create_directory("parquets");
-
-    
-    std::shared_ptr<arrow::Table> table = nullptr;
-    
-    size_t parquet_file_counter = 0;
     
     size_t num_groups = std::stoi(argv[2]);
 
@@ -173,8 +112,7 @@ arrow::Status RunMain(int argc, char *argv[]) {
     size_t current_line_number = 0;
 
     /* The iteration order is 1. groups 2. chunks 3. lines
-    We will produce compacted type files and outlier files into the top level compressed/ directory
-    We will also produce parquet files in a separate folder */
+    We will produce compacted type files and outlier files into the top level compressed/ directory */
 
     std::map<size_t, size_t> group_chunks = {};
 
@@ -305,9 +243,6 @@ arrow::Status RunMain(int argc, char *argv[]) {
         std::string all_outliers = "";
         std::vector<size_t> outlier_linenos = {};
 
-        arrow::Status s = write_parquet_file(group_number, parquet_files_prefix, parquet_file_counter, table);
-        if (!s.ok()) { return s;}
-
         for (int chunk = 0; chunk < total_chunks; ++chunk) {
 
             for (const auto & variable: chunk_variables[chunk]) {
@@ -327,7 +262,7 @@ arrow::Status RunMain(int argc, char *argv[]) {
             if (!eid_file.is_open()) {
                 std::cerr << "Error: " << std::strerror(errno);
                 std::cerr << "Failed to open file: " << chunk_filename << std::endl;
-                return arrow::Status::IOError("Failed to open file: " + chunk_filename);
+                return -1;
             }
 
             std::string line;
@@ -336,8 +271,6 @@ arrow::Status RunMain(int argc, char *argv[]) {
                 chunk_eids.push_back(std::stoi(line));
             }
             eid_file.close();
-
-            // write the parquet files first
 
             for (int eid : chunk_eids) {
 
@@ -517,20 +450,5 @@ arrow::Status RunMain(int argc, char *argv[]) {
     }
     fclose(fp);
 
-    auto writer_properties = parquet::WriterProperties::Builder().compression(parquet::Compression::ZSTD)->build();
-    std::string parquet_filename = parquet_files_prefix + std::to_string(parquet_file_counter++) + ".parquet";
-    std::shared_ptr<arrow::io::FileOutputStream> outfile;
-    ARROW_ASSIGN_OR_RAISE(outfile, arrow::io::FileOutputStream::Open(parquet_filename));
-    ARROW_RETURN_NOT_OK(parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), outfile, ROW_GROUP_SIZE, writer_properties));
-
-    return arrow::Status::OK();
-}
-
-int main(int argc, char *argv[]) {
-    
-    arrow::Status s = RunMain(argc, argv);
-    if (!s.ok()) {
-        std::cout << s.ToString() << "\n";
-    }
     return 0;
 }

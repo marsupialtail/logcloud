@@ -278,6 +278,7 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
     size_t start = 0;
     size_t end = n + 1;
 
+    size_t previous_range = -1;
     // use the FM index to search for the probe
     for(int i = Psize - 1; i >= 0; i --) {
         char c  = P[i];
@@ -292,10 +293,11 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
             std::cout << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
-        // if (end - start < 10) {
-        //     std::cout << "early exit" << std::endl;
-        //     return std::make_tuple(start, end);
-        // }
+        if ( end - start == previous_range) {
+            std::cout << "early exit" << std::endl;
+            return std::make_tuple(start, end);
+        }
+        previous_range = end - start;
     }
 
     return std::make_tuple(start, end);

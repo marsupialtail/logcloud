@@ -561,15 +561,17 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     size_t type_offset = type_offsets[type_index];
     size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
 
+    std::cout << "searching wavelet tree " << type << " " << num_iters << "\n";
+
     // go through the groups
     std::set<size_t> chunks = {};
     #pragma omp parallel for
-    for (size_t i = type_offset; i < num_iters; i += 2) {
+    for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
 
         // delay this thread by a random number of seconds under 1 second
         std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
 
-        size_t group_id = i / 2;
+        size_t group_id = (i - type_offset) / 2;
         size_t group_chunk_offset = group_id * chunks_in_group_for_type;
 
         size_t wavelet_offset = group_offsets[i];
@@ -596,7 +598,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     return chunks;
 }
 
-std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query) {
+std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query, size_t limit) {
 
     std::string processed_query = "";
     for (int i = 0; i < query.size(); i++) {
@@ -644,10 +646,13 @@ std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query
             // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         } else {
+            // only search up to limit chunks
             std::vector<size_t> result_vec(result.begin(), result.end());
+            std::vector<size_t> chunks_to_search(result_vec.begin(), result_vec.begin() + std::min(result_vec.size(), limit));
+
             VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".oahu", "us-west-2");
             // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
-            found = search_oahu(vfr_oahu, type , result_vec, query);
+            found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         }
 
         #pragma omp critical
@@ -689,7 +694,7 @@ std::vector<size_t> search_all(std::string index_name, std::string query, size_t
     } else if (result.first == 2) {
 
         std::vector<size_t> current_results(result.second.begin(), result.second.end());
-        std::vector<size_t> next_results = search_hawaii_oahu(index_name, query);
+        std::vector<size_t> next_results = search_hawaii_oahu(index_name, query, limit);
         return_results = current_results;
         return_results.insert(return_results.end(), next_results.begin(), next_results.end());
         
