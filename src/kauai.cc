@@ -7,6 +7,10 @@ The format of the kauai file is:
 
 dictionary_str |  template_str | template_pl | outlier_str | outlier_pl | outlier_type_str | outlier_type_pl
 
+Note outlier types don't mean anything. If you match in the outlier type, you might still match in oahu/hawaii
+This is because the outlier types for one 1GB chunk might be different from the outlier types for another 1GB chunk
+Say from 0-1GB 3 is an outlier type, and it matched here. But 3 might be a normal type in 1-2GB, so you still have to search Oahu/Hawaii
+
 search_kauai will return:
 (0, {}): you should brute force
 (1, {...}): list of row groups to search, no need to search Oahu/Hawaii
@@ -47,7 +51,7 @@ If not match:
             Lookup in outlier type str/pl
             If any match:
                 Add to the row groups
-                Return (1, row groups), might be fewer than K
+                Return (2, row groups), might be fewer than K
             Else:
                 Have to go search Oahu/Hawaii
                 Return (2, row groups)
