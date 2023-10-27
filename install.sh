@@ -33,4 +33,9 @@ sudo make install
 cd ..
 cd ..
 
+# pyarrow 13.0.0 will not work!
+sudo apt install -y python3-pip
+pip3 install pyarrow==12.0.0
+export PYARROW_PATH=$(python3 -c "import pyarrow; print(pyarrow.__file__.replace('__init__.py',''))")
+g++ -O3 -g -D_GLIBCXX_USE_CXX11_ABI=0 src/rex.cc src/LogCrisp_trainer_var/Trainer.o src/LogCrisp_compression_var/Compressor.o -I ${PYARROW_PATH}/include -L ${PYARROW_PATH} -o rex -L. -l:libarrow.so.1200 -l:libparquet.so.1200 -l:libzstd.a
 
