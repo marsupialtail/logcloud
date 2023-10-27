@@ -14,20 +14,11 @@
 #include <cerrno>
 #include <cstring>
 
-
-namespace fs = std::filesystem;
-
-const double ROW_GROUP_SIZE = 100000;
+const int ROW_GROUP_SIZE = 100000;
 const double DICT_RATIO_THRESHOLD = 0.5; // if something appears in more than 50% of row groups, then it is a dictionary
 
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <algorithm>
-
 using namespace std;
+namespace fs = std::filesystem;
 
 void mergeFiles(const vector<string>& inputFilenames, const vector<string>& inputFilenamesLinenumbers,
                const string& outputFilename, const string& outputFilenameLinenumbers, size_t num_row_groups) {
@@ -129,10 +120,8 @@ void mergeFiles(const vector<string>& inputFilenames, const vector<string>& inpu
     outputFileLinenumbers.close();
 }
 
-int main( int argc, char* argv[] ) {
+int compact(int num_groups) {
     
-    int num_groups = std::stoi(argv[1]);
-
     // first read the total number of lines
 
     string filename = "compressed/" + to_string(num_groups - 1) + "/current_line_number";

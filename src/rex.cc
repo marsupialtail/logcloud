@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <time.h>
 #include <cerrno>
+#include <set>
 
 #include <arrow/api.h>
 #include <arrow/status.h>
@@ -19,20 +20,55 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/properties.h>
 
-#include "variable_util.h"
 #include "type_util.h"
 
 #define DEBUG false
 
 // feed the LogCrisp compressor chunks of 64MB. Since this is the only size it's been comprehensively tested at!
-#define CHUNK_SIZE 67108864
-#define TOTAL_SAMPLE_LINES 3000000
+const int CHUNK_SIZE = 67108864;
+const int TOTAL_SAMPLE_LINES = 3000000;
 const int ROW_GROUP_SIZE = 100000;
 const int ROW_GROUPS_PER_FILE = 10;
-
 const int OUTLIER_THRESHOLD = 1000;
 
+const bool write_ts_in_parquet = false;
+
 namespace fs = std::filesystem;
+
+typedef std::pair<int, int> variable_t;
+std::tuple<std::map<int, std::set<variable_t>>, std::map<int, std::vector<variable_t>>> get_variable_info(int total_chunks, size_t group_number) {
+    
+    int a, b;
+    char underscore, V;
+    
+    std::map<variable_t, int> variable_to_type;
+    std::map<int, std::set<variable_t>> chunk_variables;
+    for (int chunk = 0; chunk < total_chunks; ++chunk) {
+        std::string variable_tag_file = "compressed/" + std::to_string(group_number) + "/variable_" + std::to_string(chunk) + "_tag.txt";
+        std::ifstream file(variable_tag_file);
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            std::string variable_str;
+            int tag;
+            iss >> variable_str >> tag;
+            std::istringstream iss2(variable_str);
+            iss2 >> V >> a >> underscore >> V >> b;
+            variable_t variable = {a,b};
+            variable_to_type[variable] = tag;
+            chunk_variables[chunk].insert(variable);
+        }
+        file.close();
+    }
+
+    std::map<int, std::vector<variable_t>> eid_to_variables;
+    for (const auto &key : variable_to_type) {
+        variable_t variable = key.first;
+        int eid = variable.first;
+        eid_to_variables[eid].push_back(variable);
+    }
+    return {chunk_variables, eid_to_variables};
+}
 
 extern "C" int trainer_wrapper(std::string sample_str, std::string output_path);
 extern "C" int compressor_wrapper(std::string& chunk, std::string output_path, std::string template_path, int prefix);
@@ -123,23 +159,17 @@ arrow::Status write_parquet_file(std::string parquet_files_prefix, std::shared_p
 arrow::Status RunMain(int argc, char *argv[]) {
 
     // get the number of input files
-    size_t num_input_files = argc - 5;
-    auto files = std::vector<std::string>(argv + 1, argv + argc - 4);
+    size_t num_input_files = argc - 6;
+    auto files = std::vector<std::string>(argv + 1, argv + argc - 5);
     std::sort(files.begin(), files.end());
 
-    std::string index_name = std::string(argv[argc - 4]);
-    size_t group_number = std::stoi(argv[argc - 3]);
-    size_t timestamp_bytes = std::stoi(argv[argc - 2]);
-    std::string timestamp_format = argv[argc - 1];
+    std::string index_name = std::string(argv[argc - 5]);
+    size_t group_number = std::stoi(argv[argc - 4]);
+    size_t timestamp_bytes = std::stoi(argv[argc - 3]);
+    std::string timestamp_format = argv[argc - 2];
 
     std::string template_prefix = "compressed/" + index_name + "_" + std::to_string(group_number);
-
-    std::string parquet_files_prefix = "parquets/" + index_name;
-    // assert the parquet directory exists
-    if (!fs::exists("parquets/")) {
-        std::cerr << "Parquet directory does not exist\n";
-        return arrow::Status::ExecutionError("Parquet directory does not exist");
-    }
+    std::string parquet_files_prefix = argv[argc - 1];
 
     std::vector<std::string> buffer;
     std::string line;
@@ -162,9 +192,9 @@ arrow::Status RunMain(int argc, char *argv[]) {
         arrow::field("timestamp", arrow::uint64()),
         arrow::field("log", arrow::utf8())
     });
-    std::shared_ptr<arrow::Array> timestamp_array, log_array;
-    arrow::UInt64Builder timestamp_builder;
-    arrow::StringBuilder log_builder;
+
+    std::vector<size_t> epoch_ts_vector = {};
+    std::vector<std::string> log_vector = {};
 
     for (size_t f = 0; f < num_input_files; ++f) {
 
@@ -215,10 +245,15 @@ arrow::Status RunMain(int argc, char *argv[]) {
             
             current_chunk += line + "\n";
 
-            ARROW_RETURN_NOT_OK(timestamp_builder.Append(epoch_ts));
-            ARROW_RETURN_NOT_OK(log_builder.Append(line));
+            
+            epoch_ts_vector.push_back(epoch_ts);
+            log_vector.push_back(line);
 
             if (current_chunk.size() >= CHUNK_SIZE) {
+
+                std::shared_ptr<arrow::Array> timestamp_array, log_array;
+                arrow::UInt64Builder timestamp_builder;
+                arrow::StringBuilder log_builder;
 
                 if (chunk_file_counter == 9998) {
                     std::cerr << "Too many chunks. Exiting\n";
@@ -227,6 +262,23 @@ arrow::Status RunMain(int argc, char *argv[]) {
 
                 chunks.push_back(std::move(current_chunk));
                 current_chunk = "";
+
+                ARROW_RETURN_NOT_OK(timestamp_builder.AppendValues(epoch_ts_vector));
+                ARROW_RETURN_NOT_OK(log_builder.AppendValues(log_vector));
+                ARROW_RETURN_NOT_OK(timestamp_builder.Finish(&timestamp_array));
+                ARROW_RETURN_NOT_OK(log_builder.Finish(&log_array));
+                std::shared_ptr<arrow::Table> table = arrow::Table::Make(schema, {timestamp_array, log_array});
+
+                if (! write_ts_in_parquet) {
+                    table = table->SelectColumns({1}).ValueOrDie();
+                }
+
+                arrow::Status s = write_parquet_file(parquet_files_prefix, table );
+                if (!s.ok()) { return s;}
+
+                epoch_ts_vector.clear();
+                log_vector.clear();
+
             }
             
         }
@@ -235,11 +287,21 @@ arrow::Status RunMain(int argc, char *argv[]) {
         
     } 
 
+    std::shared_ptr<arrow::Array> timestamp_array, log_array;
+    arrow::UInt64Builder timestamp_builder;
+    arrow::StringBuilder log_builder;
+    ARROW_RETURN_NOT_OK(timestamp_builder.AppendValues(epoch_ts_vector));
+    ARROW_RETURN_NOT_OK(log_builder.AppendValues(log_vector));
+
     ARROW_RETURN_NOT_OK(timestamp_builder.Finish(&timestamp_array));
     ARROW_RETURN_NOT_OK(log_builder.Finish(&log_array));
     std::shared_ptr<arrow::Table> table = arrow::Table::Make(schema, {timestamp_array, log_array});
 
-    arrow::Status s = write_parquet_file(parquet_files_prefix, table);
+    if (! write_ts_in_parquet) {
+        table = table->SelectColumns({1}).ValueOrDie();
+    }
+
+    arrow::Status s = write_parquet_file(parquet_files_prefix, table );
     if (!s.ok()) { return s;}
 
     // write the last chunk
@@ -369,8 +431,6 @@ arrow::Status RunMain(int argc, char *argv[]) {
             kv.second->close();
         }
     }
-
-    
 
     // write the current_line_number to a file
     std::ofstream current_line_number_file("compressed/" + std::to_string(group_number) + "/current_line_number");

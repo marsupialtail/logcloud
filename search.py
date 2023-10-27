@@ -4,6 +4,7 @@ import polars
 from ctypes import *
 import ctypes
 import sys
+import boto3
 
 ROW_GROUPS_IN_FILE = 10
 
@@ -58,22 +59,32 @@ def brute_force_search(filenames, query, limit):
     return polars.concat(results)
 
 index_name = sys.argv[1]
-query = sys.argv[2]
-limit = int(sys.argv[3])
-
-FILEPATH = "s3://cluster-dump/{}-parquets/".format(index_name)
-filenames = ["{}{}{}.parquet".format(FILEPATH, index_name, i) for i in range(len(daft.daft.io_glob(FILEPATH)))]
+num_splits = int(sys.argv[2]) # in the future this will be read from a metadata file.
+query = sys.argv[3]
+limit = int(sys.argv[4])
 
 lib = PyDLL('libindex.so')
-lib.search_python.argtypes = [c_char_p, c_char_p, c_size_t]
-lib.search_python.restype = Vector
-result = lib.search_python(index_name.encode('utf-8'), query.encode('utf-8'), limit)
 
-row_groups = [result.data[i] for i in range(result.size)]
+if index_name[:5] == "s3://":
 
-if row_groups != [EMPTY]:
-    result = row_group_search(filenames, row_groups, query)
-else:
-    result = brute_force_search(filenames, query, limit)
+    index_name = index_name[5:].rstrip("/")
+    bucket = index_name.split("/")[0]
 
-result.write_parquet("search_result.parquet")
+    split_prefixes = ["split_" + str(i) for i in range(num_splits)]
+
+    # read the splits in reverse order 
+    for split in split_prefixes[::-1]:
+        filenames = ["s3://{}{}{}.parquet".format(index_name, i) for i in range(len(daft.daft.io_glob(FILEPATH)))]
+
+        lib.search_python.argtypes = [c_char_p, c_char_p, c_size_t]
+        lib.search_python.restype = Vector
+        result = lib.search_python(index_name.encode('utf-8'), query.encode('utf-8'), limit)
+
+    # row_groups = [result.data[i] for i in range(result.size)]
+
+    # if row_groups != [EMPTY]:
+    #     result = row_group_search(filenames, row_groups, query)
+    # else:
+    #     result = brute_force_search(filenames, query, limit)
+
+    # result.write_parquet("search_result.parquet")

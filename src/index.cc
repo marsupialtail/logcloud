@@ -12,6 +12,7 @@
 #include "kauai.h"
 #include "python_interface.h"
 #include "type_util.h"
+#include "compactor.h"
 
 /*
 This step is going to first discover all the compressed/compacted_type* files
@@ -211,13 +212,6 @@ std::pair<std::map<int, size_t>, std::map<int, size_t>> write_oahu(std::string o
             std::istringstream iss(lineno_line);
             std::vector<plist_size_t> numbers;
             plist_size_t number;
-            // while (iss >> number) {
-            //     number = number / ROW_GROUP_SIZE;
-            //     if(numbers.size() > 0 && numbers.back() == number) {
-            //         continue;
-            //     }
-            //     numbers.push_back(number);
-            // }
 
             while (iss >> number) {
                 numbers.push_back(number);
@@ -702,6 +696,7 @@ int main(int argc, char *argv[]) {
     if (mode == "index") {
         std::string index_name = argv[2];
         size_t num_groups = std::stoul(argv[3]);
+        compact(num_groups);
         write_kauai(index_name, num_groups);
         auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name);    
         write_hawaii(index_name, type_chunks, type_uncompressed_lines_in_block);

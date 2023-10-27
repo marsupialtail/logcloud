@@ -75,7 +75,6 @@ std::pair<int, std::vector<plist_size_t>> search_kauai(VirtualFileRegion * vfr, 
     vfr->vfread(byte_offsets, sizeof(size_t) * 6);
 
     vfr->vfseek(0, SEEK_SET);
-    std::cout << vfr->vftell() << std::endl;
 
     // read in the dictionary
     size_t dictionary_str_size = byte_offsets[0];
@@ -280,7 +279,6 @@ int write_kauai(std::string filename, int num_groups) {
             std::ostringstream oss;
             oss << "compressed/" + std::to_string(group_number) + "/chunk" << std::setw(4) << std::setfill('0') << chunk << ".eid";
             std::string chunk_filename = oss.str();
-            std::cout << "processing chunk file: " << chunk_filename << std::endl;
 
             oss.str("");
             oss << "compressed/" + std::to_string(group_number) + "/chunk" << std::setw(4) << std::setfill('0') << chunk << ".outlier";
@@ -322,7 +320,7 @@ int write_kauai(std::string filename, int num_groups) {
     for (size_t i = 0; i < templates.size(); ++i) {
         fprintf(template_fp, "%s\n", templates[i].c_str());
         for (size_t j = 0; j < template_posting_lists[i].size(); ++j) {
-            fprintf(template_lineno_fp, "%lu ", template_posting_lists[i][j]);
+            fprintf(template_lineno_fp, "%u ", template_posting_lists[i][j]);
         }
         fprintf(template_lineno_fp, "\n");
     }
@@ -351,14 +349,10 @@ int write_kauai(std::string filename, int num_groups) {
     fwrite(compressed_template_str.c_str(), sizeof(char), compressed_template_str.size(), fp);
     byte_offsets.push_back(ftell(fp));
 
-    std::cout << "template str size: " << template_str.size() << std::endl;
-
     PListChunk plist2(std::move(template_posting_lists));
     std::string serialized2 = plist2.serialize();
     fwrite(serialized2.c_str(), sizeof(char), serialized2.size(), fp);
     byte_offsets.push_back(ftell(fp));
-
-    std::cout << "template pl size: " << serialized2.size() << std::endl;
 
     // concatenate the outlier strings into one string and compress that
     std::string outlier_str = "";
@@ -371,14 +365,10 @@ int write_kauai(std::string filename, int num_groups) {
     fwrite(compressed_outlier_str.c_str(), sizeof(char), compressed_outlier_str.size(), fp);
     byte_offsets.push_back(ftell(fp));
 
-    std::cout << "compressed outlier str size: " << compressed_outlier_str.size() << std::endl;
-
     PListChunk plist(std::move(outlier_linenos));
     std::string serialized = plist.serialize();
     fwrite(serialized.c_str(), sizeof(char), serialized.size(), fp);
     byte_offsets.push_back(ftell(fp));
-
-    std::cout << "outlier pl size: " << serialized.size() << std::endl;
 
     std::string outlier_type_str = "";
     std::ifstream outlier_type_infile("compressed/outlier");
@@ -404,25 +394,19 @@ int write_kauai(std::string filename, int num_groups) {
     std::string compressed_outlier_type_str = compressor.compress(outlier_type_str.c_str(), outlier_type_str.size());
     fwrite(compressed_outlier_type_str.c_str(), sizeof(char), compressed_outlier_type_str.size(), fp);
     byte_offsets.push_back(ftell(fp));
-    std::cout << "outlier_type str size: " << compressed_outlier_type_str.size() << std::endl;
 
     PListChunk plist3(std::move(outlier_type_linenos));
     std::string serialized3 = plist3.serialize();
-    std::cout << "outlier type lineno size " << serialized3.size() << "\n";
     fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
 
-    // write out the byte offsets
-    for (size_t byte_offset : byte_offsets) {
-        std::cout << byte_offset << " ";
-    }
     fwrite(byte_offsets.data(), sizeof(size_t), byte_offsets.size(), fp);
 
     //print out byte_offsets
-    std::cout << "byte offsets: ";
-    for (size_t byte_offset : byte_offsets) {
-        std::cout << byte_offset << " ";
-    }
-    std::cout << std::endl;
+    // std::cout << "byte offsets: ";
+    // for (size_t byte_offset : byte_offsets) {
+    //     std::cout << byte_offset << " ";
+    // }
+    // std::cout << std::endl;
 
     fclose(fp);
     return 0;
