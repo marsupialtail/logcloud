@@ -1,5 +1,5 @@
-# fts
-Full text index. Not open source.
+# Rottnest
+Unified data lake storage for metrics , logs and traces. 
 
 # Quick start
 This is verified to work on a fresh Ubuntu 22 instance (r6id.2xlarge) on AWS.
