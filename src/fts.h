@@ -28,7 +28,7 @@ void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const
 
 #define GIVEUP 100
 
-std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegion * log_idx_vfr, std::string query) {
+std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegion * log_idx_vfr, std::string query) {
     size_t log_idx_size = log_idx_vfr->size();
     size_t compressed_offsets_byte_offset;
     
@@ -38,6 +38,8 @@ std::vector<size_t> search_disk(VirtualFileRegion * wavelet_vfr, VirtualFileRegi
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
     std::cout << "log_idx decompress offsets took " << duration.count() << " milliseconds, this could choke for concurrent requests!" << std::endl;
+
+    
 
     log_idx_vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
     Compressor compressor(CompressionAlgorithm::ZSTD);

@@ -3,27 +3,33 @@
 std::atomic<int> VirtualFileRegion::num_reads(0);
 std::atomic<int> VirtualFileRegion::num_bytes_read(0);
 
-DiskVirtualFileRegion::DiskVirtualFileRegion(const char* filename, size_t start, size_t length)
+DiskVirtualFileRegion::DiskVirtualFileRegion(std::string filename, long start, long length)
     : filename_(filename), start_(start) {
-    file_ = fopen(filename, "rb");
+    file_ = fopen(filename.c_str(), "rb");
     if (file_) {
         fseek(file_, 0, SEEK_END);
-        size_t fileSize = ftell(file_);
+        long fileSize = ftell(file_);
         end_ = (start + length <= fileSize) ? start + length : fileSize;
         size_ = end_ - start_;
         fseek(file_, start_, SEEK_SET);
+    } else {
+        std::cout << "Error opening file: " << filename << std::endl;
+        exit(1);
     }
 }
 
-DiskVirtualFileRegion::DiskVirtualFileRegion(const char* filename)
+DiskVirtualFileRegion::DiskVirtualFileRegion(std::string filename)
     : filename_(filename), start_(0) {
-    file_ = fopen(filename, "rb");
+    file_ = fopen(filename.c_str(), "rb");
     if (file_) {
         fseek(file_, 0, SEEK_END);
-        size_t fileSize = ftell(file_);
+        long fileSize = ftell(file_);
         end_ = fileSize;
         size_ = end_ - start_;
         fseek(file_, 0, SEEK_SET);
+    } else {
+        std::cout << "Error opening file: " << filename << std::endl;
+        exit(1);
     }
 }
 
@@ -33,11 +39,11 @@ DiskVirtualFileRegion::~DiskVirtualFileRegion() {
     }
 }
 
-size_t DiskVirtualFileRegion::size() const {
+long DiskVirtualFileRegion::size() const {
     return size_;
 }
 
-int DiskVirtualFileRegion::vfseek(size_t offset, int origin) {
+int DiskVirtualFileRegion::vfseek(long offset, int origin) {
     switch (origin) {
         case SEEK_SET:
             return fseek(file_, start_ + offset, SEEK_SET);
@@ -50,13 +56,14 @@ int DiskVirtualFileRegion::vfseek(size_t offset, int origin) {
     }
 }
 
-size_t DiskVirtualFileRegion::vftell() {
-    size_t current = ftell(file_);
+long DiskVirtualFileRegion::vftell() {
+    long current = ftell(file_);
     return current - start_;
 }
 
-void DiskVirtualFileRegion::vfread(void* buffer, size_t size) {
+void DiskVirtualFileRegion::vfread(void* buffer, long size) {
     if (ftell(file_) + size > end_) {
+        std::cout << "fread failed, size: " << size << " current pos: " << ftell(file_) << " end: " << end_ << std::endl;
         assert(false);
     }
     num_reads++;
@@ -68,7 +75,7 @@ void DiskVirtualFileRegion::vfread(void* buffer, size_t size) {
     }
 }
 
-VirtualFileRegion* DiskVirtualFileRegion::slice(size_t start, size_t length) {
+VirtualFileRegion* DiskVirtualFileRegion::slice(long start, long length) {
     if (start + length > end_) {
         assert(false);
     }
@@ -90,7 +97,7 @@ S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std
     size_ = end_ - start_;
 }
 
-S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length)
+S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, long start, long length)
     : s3_client_(s3_client), bucket_name_(bucket_name), object_name_(object_name), region_(region), start_(start), cursor_(start) {
     
     object_request_ = Aws::S3::Model::GetObjectRequest();
@@ -103,15 +110,15 @@ S3VirtualFileRegion::S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std
 S3VirtualFileRegion::~S3VirtualFileRegion() {
 }
 
-size_t S3VirtualFileRegion::size() const {
+long S3VirtualFileRegion::size() const {
     return size_;
 }
 
-size_t S3VirtualFileRegion::object_size() {
+long S3VirtualFileRegion::object_size() {
     Aws::S3::Model::HeadObjectRequest head_object_request;
     head_object_request.WithBucket(object_request_.GetBucket()).WithKey(object_request_.GetKey());
     auto head_object_outcome = s3_client_.HeadObject(head_object_request);
-    size_t file_size;
+    long file_size;
     if (head_object_outcome.IsSuccess()) {
         file_size = head_object_outcome.GetResult().GetContentLength();
     } else {
@@ -121,7 +128,7 @@ size_t S3VirtualFileRegion::object_size() {
     return file_size;
 }
 
-int S3VirtualFileRegion::vfseek(size_t offset, int origin) {
+int S3VirtualFileRegion::vfseek(long offset, int origin) {
     switch (origin) {
         case SEEK_SET:
             cursor_ = start_ + offset;
@@ -137,7 +144,7 @@ int S3VirtualFileRegion::vfseek(size_t offset, int origin) {
     }
 }
 
-size_t S3VirtualFileRegion::vftell() {
+long S3VirtualFileRegion::vftell() {
     return cursor_;
 }
 
@@ -145,7 +152,7 @@ void S3VirtualFileRegion::reset() {
     cursor_ = start_;
 }
 
-void S3VirtualFileRegion::vfread(void* buffer, size_t size) {
+void S3VirtualFileRegion::vfread(void* buffer, long size) {
     
     num_reads++;
     num_bytes_read += size;
@@ -173,7 +180,7 @@ void S3VirtualFileRegion::vfread(void* buffer, size_t size) {
     retrieved_data.read(static_cast<char*>(buffer), size);
 }
 
-VirtualFileRegion* S3VirtualFileRegion::slice(size_t start, size_t length) {
+VirtualFileRegion* S3VirtualFileRegion::slice(long start, long length) {
     if (start + length > end_) {
         assert(false);
     }

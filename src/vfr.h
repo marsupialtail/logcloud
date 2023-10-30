@@ -13,43 +13,43 @@ public:
 
     virtual ~VirtualFileRegion() = default;
 
-    virtual size_t size() const = 0;
-    virtual int vfseek(size_t offset, int origin) = 0;
-    virtual size_t vftell() = 0;
-    virtual void vfread(void* buffer, size_t size) = 0;
+    virtual long size() const = 0;
+    virtual int vfseek(long offset, int origin) = 0;
+    virtual long vftell() = 0;
+    virtual void vfread(void* buffer, long size) = 0;
     virtual void reset() = 0;
-    virtual VirtualFileRegion* slice(size_t start, size_t length) = 0;
+    virtual VirtualFileRegion* slice(long start, long length) = 0;
 };
 
 class DiskVirtualFileRegion : public VirtualFileRegion {
 private:
-    const char* filename_;
+    std::string filename_;
     FILE* file_;
-    size_t start_;
-    size_t end_;
-    size_t size_;
+    long start_;
+    long end_;
+    long size_;
 
 public:
-    DiskVirtualFileRegion(const char* filename, size_t start, size_t length);
-    DiskVirtualFileRegion(const char* filename);
+    DiskVirtualFileRegion(std::string filename, long start, long length);
+    DiskVirtualFileRegion(std::string filename);
     ~DiskVirtualFileRegion();
-    size_t size() const override;
-    int vfseek(size_t offset, int origin) override;
-    size_t vftell() override;
-    void vfread(void* buffer, size_t size) override;
+    long size() const override;
+    int vfseek(long offset, int origin) override;
+    long vftell() override;
+    void vfread(void* buffer, long size) override;
     void reset() override;
-    VirtualFileRegion* slice(size_t start, size_t length) override;
+    VirtualFileRegion* slice(long start, long length) override;
 };
 
 class S3VirtualFileRegion : public VirtualFileRegion {
 private:
-    size_t start_;
-    size_t end_;
-    size_t size_;
+    long start_;
+    long end_;
+    long size_;
     std::string bucket_name_;
     std::string object_name_;
     std::string region_;
-    size_t cursor_;
+    long cursor_;
 
     const Aws::S3::S3Client& s3_client_;
     Aws::S3::Model::GetObjectRequest object_request_;
@@ -58,13 +58,13 @@ private:
 
 public:
     S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region);
-    S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, size_t start, size_t length);
+    S3VirtualFileRegion(const Aws::S3::S3Client& s3_client, std::string bucket_name, std::string object_name, std::string region, long start, long length);
     ~S3VirtualFileRegion();
-    size_t size() const override;
-    size_t object_size();
-    int vfseek(size_t offset, int origin) override;
-    size_t vftell() override;
-    void vfread(void* buffer, size_t size) override;
+    long size() const override;
+    long object_size();
+    int vfseek(long offset, int origin) override;
+    long vftell() override;
+    void vfread(void* buffer, long size) override;
     void reset() override;
-    VirtualFileRegion* slice(size_t start, size_t length) override;
+    VirtualFileRegion* slice(long start, long length) override;
 };

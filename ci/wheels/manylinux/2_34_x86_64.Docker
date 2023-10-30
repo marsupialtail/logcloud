@@ -1,0 +1,9 @@
+FROM quay.io/pypa/manylinux_2_28_x86_64
+
+COPY . /fts
+
+RUN chmod +x /fts/ci/wheels/manylinux/build.sh
+
+WORKDIR /fts
+
+# ENTRYPOINT ci/wheels/manylinux/build.sh

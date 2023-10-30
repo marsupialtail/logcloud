@@ -109,7 +109,7 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
     // go through the blocks
     std::vector<plist_size_t> row_groups = {};
 
-    #pragma omp parallel for
+    #pragma omp parallel for 
     for (size_t i = 0; i < std::min(chunks.size(), num_chunks); ++i) {
         size_t block_offset = block_offsets[type_offset + chunks[i]];
         size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
@@ -470,7 +470,6 @@ The layout of the compressed metadata page
 std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string query) {
     // read in the metadata page size and then the metadata page and then decompress everything
     
-    // DiskVirtualFileRegion vfr(filename.c_str());
     vfr->vfseek(-sizeof(size_t), SEEK_END);
     size_t metadata_page_length;
     vfr->vfread(&metadata_page_length, sizeof(size_t));
@@ -480,8 +479,6 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     std::string metadata_page;
     metadata_page.resize(metadata_page_length);
     vfr->vfread(&metadata_page[0], metadata_page_length);
-
-    // decompress the metadata page
     Compressor compressor(CompressionAlgorithm::ZSTD);
     std::string decompressed_metadata_page = compressor.decompress(metadata_page);
 
@@ -537,7 +534,7 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
 
     // go through the groups
     std::set<size_t> chunks = {};
-    #pragma omp parallel for
+    #pragma omp parallel for 
     for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
 
         // delay this thread by a random number of seconds under 1 second
@@ -556,13 +553,13 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
         VirtualFileRegion * wavelet_vfr  = vfr->slice(wavelet_offset, wavelet_size);
         VirtualFileRegion * logidx_vfr = vfr->slice(logidx_offset, logidx_size);
 
-        auto matched_pos = search_disk(wavelet_vfr, logidx_vfr, query);
+        auto matched_pos = search_vfr(wavelet_vfr, logidx_vfr, query);
 
         //print out matched_pos
         #pragma omp critical
         {
             for (auto pos : matched_pos) {
-                std::cout << "pos " << pos << "\n";
+                // std::cout << "pos " << pos << "\n";
                 chunks.insert(group_chunk_offset + pos);
             }
         }
@@ -570,7 +567,9 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
     return chunks;
 }
 
-std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query, size_t limit) {
+std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFileRegion * vfr_oahu, std::string query, size_t limit) {
+
+    // if split_index_prefix starts with s3://
 
     std::string processed_query = "";
     for (int i = 0; i < query.size(); i++) {
@@ -584,28 +583,22 @@ std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query
     int query_type = get_type(processed_query.c_str());
     std::cout << "deduced type: " << query_type << "\n";
     std::vector<int> types_to_search = get_all_types(query_type);
-
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = "us-west-2";
-    clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    clientConfig.requestTimeoutMs = 10000; // 10 seconds
-    Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
     
     // print out types to search
     for (int type: types_to_search) {
         std::cout << "type to search: " << type << "\n";
     }
 
-    std::vector<size_t> results;
+    std::set<size_t> results;
 
-    #pragma omp parallel for num_threads(4)
+    // you cannot parallelize this loop here because vfr_hawaii is going to be shared across threads and will have conflicts on the cursor_!
+
     for (int type: types_to_search) {
 
         std::cout << "searching type " << type << "\n";
         std::vector<plist_size_t> found;
 
-        // std::set<size_t> result =  search_hawaii(new DiskVirtualFileRegion("hadoop.hawaii"), type, query);
-        std::set<size_t> result =  search_hawaii(new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".hawaii", "us-west-2"), type, query);
+        std::set<size_t> result =  search_hawaii(vfr_hawaii, type, query);
         for (size_t r : result) {
             std::cout << r << "\n";
         }
@@ -614,42 +607,67 @@ std::vector<size_t> search_hawaii_oahu(std::string index_name, std::string query
             std::cout << "type not found, brute forcing Oahu\n";
             std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
             std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
-            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".oahu", "us-west-2");
-            // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         } else {
             // only search up to limit chunks
             std::vector<size_t> result_vec(result.begin(), result.end());
             std::vector<size_t> chunks_to_search(result_vec.begin(), result_vec.begin() + std::min(result_vec.size(), limit));
-
-            VirtualFileRegion * vfr_oahu = new S3VirtualFileRegion(s3_client, "cluster-dump", index_name + ".oahu", "us-west-2");
-            // VirtualFileRegion * vfr_oahu = new DiskVirtualFileRegion("compressed/hadoop.oahu");
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         }
 
-        #pragma omp critical
-        {
-            for (plist_size_t r : found) {
-                results.push_back(r);
-            }   
-        }
+        
+        for (plist_size_t r : found) {
+            results.insert(r);
+        }   
+        
     }
 
     return results;
 }
 
-std::vector<size_t> search_all(std::string index_name, std::string query, size_t limit) {
+std::vector<size_t> search_all(std::string split_index_prefix, std::string query, size_t limit) {
+
+    /*
+    Expects a split_index_prefix of the form s3://bucket/index-name/indices/split_id or path/index-name/indices/split_id
+    */
+
+    VirtualFileRegion * vfr_hawaii;
+    VirtualFileRegion * vfr_oahu;
+    VirtualFileRegion * vfr_kauai;
 
     Aws::SDKOptions options;
     Aws::InitAPI(options);
+
+    // print out the split_index_prefix
+    std::cout << "split_index_prefix: " << split_index_prefix << "\n";
+
     Aws::Client::ClientConfiguration clientConfig;
     clientConfig.region = "us-west-2";
     clientConfig.connectTimeoutMs = 10000; // 10 seconds
     clientConfig.requestTimeoutMs = 10000; // 10 seconds
     Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
 
-    VirtualFileRegion * vfr = new S3VirtualFileRegion(s3_client, "cluster-dump", std::string(index_name + ".kauai"), "us-west-2");
-    std::pair<int, std::vector<plist_size_t>> result = search_kauai(vfr, query, 1, limit);
+    if (split_index_prefix.find("s3://") != std::string::npos) {
+
+        split_index_prefix = split_index_prefix.substr(5);
+        std::string bucket = split_index_prefix.substr(0, split_index_prefix.find("/"));
+        std::string prefix = split_index_prefix.substr(split_index_prefix.find("/") + 1);
+
+        // print out the bucket and prefix
+        std::cout << "bucket: " << bucket << "\n";
+        std::cout << "prefix: " << prefix << "\n";
+
+        vfr_hawaii = new S3VirtualFileRegion(s3_client, bucket, prefix + ".hawaii", "us-west-2");
+        vfr_oahu = new S3VirtualFileRegion(s3_client, bucket, prefix + ".oahu", "us-west-2");
+        vfr_kauai = new S3VirtualFileRegion(s3_client, bucket, prefix + ".kauai", "us-west-2");
+
+    } else {
+        vfr_hawaii = new DiskVirtualFileRegion(split_index_prefix + ".hawaii");
+        vfr_oahu = new DiskVirtualFileRegion(split_index_prefix + ".oahu");
+        vfr_kauai = new DiskVirtualFileRegion(split_index_prefix + ".kauai");
+    }
+
+    std::pair<int, std::vector<plist_size_t>> result = search_kauai(vfr_kauai, query, 1, limit);
 
     std::vector<size_t> return_results = {};
 
@@ -666,7 +684,7 @@ std::vector<size_t> search_all(std::string index_name, std::string query, size_t
     } else if (result.first == 2) {
 
         std::vector<size_t> current_results(result.second.begin(), result.second.end());
-        std::vector<size_t> next_results = search_hawaii_oahu(index_name, query, limit);
+        std::set<size_t> next_results = search_hawaii_oahu(vfr_hawaii, vfr_oahu, query, limit);
         return_results = current_results;
         return_results.insert(return_results.end(), next_results.begin(), next_results.end());
         
@@ -676,12 +694,17 @@ std::vector<size_t> search_all(std::string index_name, std::string query, size_t
 
     Aws::ShutdownAPI(options);
     return return_results;
+
+    free(vfr_hawaii);
+    free(vfr_oahu);
+    free(vfr_kauai);
     
 }
 
 extern "C" {
-Vector search_python(const char * index_name, const char * query, size_t limit) {
-    std::vector<size_t> results = search_all(index_name, query, limit);
+// expects index_prefix in the format bucket/index_name/split_id/index_name
+Vector search_python(const char * split_index_prefix, const char * query, size_t limit) {
+    std::vector<size_t> results = search_all(split_index_prefix, query, limit);
     Vector v = pack_vector(results);
     return v;
 }
@@ -701,10 +724,10 @@ int main(int argc, char *argv[]) {
         auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name);    
         write_hawaii(index_name, type_chunks, type_uncompressed_lines_in_block);
     } else if (mode == "search") {
-        std::string index_name = argv[2];
+        std::string split_index_prefix = argv[2];
         std::string query = argv[3];
         size_t limit = std::stoul(argv[4]);
-        std::vector<size_t> results = search_all(index_name, query, limit);
+        std::vector<size_t> results = search_all(split_index_prefix, query, limit);
         std::cout << "results: \n";
         for (size_t r : results) {
             std::cout << r << "\n";

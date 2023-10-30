@@ -53,7 +53,7 @@ int main(int argc, const char *argv[1]) {
 
         VirtualFileRegion * wavelet_vfr = new DiskVirtualFileRegion(wavelet_filename);
         VirtualFileRegion * log_idx_vfr = new DiskVirtualFileRegion(log_idx_filename);
-        auto matched_pos = search_disk(wavelet_vfr, log_idx_vfr, query);
+        auto matched_pos = search_vfr(wavelet_vfr, log_idx_vfr, query);
 
         // print out the matchd pos 
 
