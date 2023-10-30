@@ -47,7 +47,7 @@ for PYTHON in ${PYTHONS}; do
     "${PYBIN}/pip" wheel . --no-deps -w ./wheelhouse/
 done
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/fts/aws-sdk-cpp/build/lib:/fts/aws-sdk-cpp/build/lib64:/fts/libdivsufsort/build/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:aws-sdk-cpp/build/lib:aws-sdk-cpp/build/lib64:libdivsufsort/build/lib
 
 # Bundle external shared libraries into the wheels
 for whl in ./wheelhouse/*.whl; do
