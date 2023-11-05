@@ -304,8 +304,10 @@ arrow::Status RunMain(int argc, char *argv[]) {
     arrow::Status s = write_parquet_file(parquet_files_prefix, table );
     if (!s.ok()) { return s;}
 
-    // write the last chunk
-    chunks.push_back(std::move(current_chunk));
+    // write the last chunk, if it contains things
+    if (current_chunk.size() > 0){
+        chunks.push_back(std::move(current_chunk));
+    }
     current_chunk = "";
 
     std::string samples_str = "";
@@ -441,6 +443,8 @@ arrow::Status RunMain(int argc, char *argv[]) {
     std::map<int, std::ofstream*> compacted_lineno_files;
     std::ofstream outlier_file("compressed/" + std::to_string(group_number) + "/outlier");
     std::ofstream outlier_lineno_file("compressed/" + std::to_string(group_number) + "/outlier_lineno");
+    std::vector<std::string> outlier_items;
+    std::vector<std::vector<size_t>> outlier_lineno;
 
     for (const int &t : touched_types) {
         if (expanded_items[t].empty()) {return arrow::Status::ExecutionError("Error in variable extraction. No items detected for type " + std::to_string(t));}
@@ -493,13 +497,15 @@ arrow::Status RunMain(int argc, char *argv[]) {
                 
             }
         } else {
-            for (size_t i = 0; i < compacted_items.size(); ++i) {
-                outlier_file << compacted_items[i] << "\n";
-                for (int num : compacted_lineno[i]) {
-                    outlier_lineno_file << num << " ";
-                }
-                outlier_lineno_file << "\n";
-            }
+            // for (size_t i = 0; i < compacted_items.size(); ++i) {
+            //     outlier_file << compacted_items[i] << "\n";
+            //     for (int num : compacted_lineno[i]) {
+            //         outlier_lineno_file << num << " ";
+            //     }
+            //     outlier_lineno_file << "\n";
+            // }
+            outlier_items.insert(outlier_items.end(), compacted_items.begin(), compacted_items.end());
+            outlier_lineno.insert(outlier_lineno.end(), compacted_lineno.begin(), compacted_lineno.end());
         }
 
         expanded_items[t].clear();
@@ -509,6 +515,25 @@ arrow::Status RunMain(int argc, char *argv[]) {
             compacted_lineno_files[t]->close();
         }
     }
+
+    // sort outlier_items and outlier_linenos in accordance to outlier_items
+    std::vector<std::pair<std::string, std::vector<size_t>>> paired;
+    for (size_t i = 0; i < outlier_items.size(); ++i) {
+        paired.emplace_back(outlier_items[i], outlier_lineno[i]);
+    }
+    // outlier items should be different
+    std::sort(paired.begin(), paired.end());
+    for (size_t i = 0; i < paired.size(); ++i) {
+        outlier_file << paired[i].first << "\n";
+        // outlier_lineno[i] = paired[i].second;
+        for (int num : paired[i].second) {
+            outlier_lineno_file << num << " ";
+        }
+        outlier_lineno_file << "\n";
+    }
+
+    outlier_file.close();
+    outlier_lineno_file.close();
 
     // write final maui
     // if ( variable_buffer.size() > 0 ) {

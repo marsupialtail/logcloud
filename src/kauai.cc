@@ -123,6 +123,7 @@ std::pair<int, std::vector<plist_size_t>> search_kauai(VirtualFileRegion * vfr, 
     outlier_type_str.resize(outlier_type_str_size);
     vfr->vfseek(byte_offsets[4], SEEK_SET);
     vfr->vfread(&outlier_type_str[0], outlier_type_str_size);
+    std::string decompressed_outlier_type_str = compressor.decompress(outlier_type_str);
 
     // read in the outlier type posting lists, first get the file size, the limit is file_size - byte_offsets[7] - 8 * sizeof(size_t)
 
@@ -153,7 +154,8 @@ std::pair<int, std::vector<plist_size_t>> search_kauai(VirtualFileRegion * vfr, 
     std::vector<plist_size_t> matched_row_groups = {};
 
     auto search_text = [] (std::string & query, std::string & source_str, 
-        std::vector <std::vector<plist_size_t>> & plists, std::vector<plist_size_t> & matched_row_groups) {
+        std::vector <std::vector<plist_size_t>> & plists, std::vector<plist_size_t> & matched_row_groups, bool write = false) {
+        if (write) {std::cout << source_str << std::endl;}
         std::istringstream iss(source_str);
         size_t line_no = 0;
         std::string line;
@@ -172,15 +174,17 @@ std::pair<int, std::vector<plist_size_t>> search_kauai(VirtualFileRegion * vfr, 
             line_no ++;
         }
     };
+    
 
     // now lookup the query in templates
     // read the templates line by line, and then search for the query in each line
     search_text(query, decompressed_template_str, template_plist, matched_row_groups);
 
-    if (matched_row_groups.size() >= k) {
-        std::cout << "inexact query for top K satisfied by template " << query << std::endl;
-        return std::make_pair(1, matched_row_groups);
-    } 
+    // print out th matched row groups here
+    for (plist_size_t row_group : matched_row_groups) {
+        std::cout << row_group << " ";
+    }
+    std::cout << std::endl;
 
     search_text(query, decompressed_outlier_str, outlier_plist, matched_row_groups);
 
@@ -190,7 +194,7 @@ std::pair<int, std::vector<plist_size_t>> search_kauai(VirtualFileRegion * vfr, 
     } 
 
     // now you have to go lookup in outlier types
-    search_text(query, outlier_type_str, outlier_type_plist, matched_row_groups);
+    search_text(query, decompressed_outlier_type_str, outlier_type_plist, matched_row_groups);
 
     if (matched_row_groups.size() >= k) {
         std::cout << "inexact query for top K satisfied by template, outlier and outlier types " << query << std::endl;
@@ -382,7 +386,6 @@ int write_kauai(std::string filename, int num_groups) {
         std::vector<plist_size_t> numbers;
         plist_size_t number;
         while (iss >> number) {
-            number = number / ROW_GROUP_SIZE;
             if(numbers.size() > 0 && numbers.back() == number) {
                 continue;
             }
@@ -400,13 +403,6 @@ int write_kauai(std::string filename, int num_groups) {
     fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
 
     fwrite(byte_offsets.data(), sizeof(size_t), byte_offsets.size(), fp);
-
-    //print out byte_offsets
-    // std::cout << "byte offsets: ";
-    // for (size_t byte_offset : byte_offsets) {
-    //     std::cout << byte_offset << " ";
-    // }
-    // std::cout << std::endl;
 
     fclose(fp);
     return 0;

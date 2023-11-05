@@ -467,7 +467,7 @@ The layout of the compressed metadata page
     fclose(fp);
 }
 
-std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string query) {
+std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vector<int> types, std::string query) {
     // read in the metadata page size and then the metadata page and then decompress everything
     
     vfr->vfseek(-sizeof(size_t), SEEK_END);
@@ -497,74 +497,80 @@ std::set<size_t> search_hawaii(VirtualFileRegion * vfr, int type, std::string qu
         std::cout << "type order: " << type_order[i] << "\n";
     }
 
-    auto it = std::find(type_order.begin(), type_order.end(), type);
-    size_t type_index = std::distance(type_order.begin(), it);
+    std::map<int, std::set<size_t>> type_chunks = {};
 
-    // if not found return empty
-    if (type_index == num_types) {
-        return {(size_t)-1};
-    }
+    for (int type: types) {
 
-    std::vector<int> chunks_in_group;
-    for (size_t i = 0; i < num_types; ++i) {
-        chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "chunks in group: " << chunks_in_group[i] << "\n";
-    }
+        auto it = std::find(type_order.begin(), type_order.end(), type);
+        size_t type_index = std::distance(type_order.begin(), it);
 
-    size_t chunks_in_group_for_type = chunks_in_group[type_index];
+        // if not found return empty
+        if (type_index == num_types) {
+            type_chunks[type] = {(size_t)-1};
+            continue;
+        }
 
-    // read the type offsets
-    std::vector<size_t> type_offsets;
-    for (size_t i = 0; i < num_types + 1; ++i) {
-        type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "type offsets: " << type_offsets[i] << "\n";
-    }
+        std::vector<int> chunks_in_group;
+        for (size_t i = 0; i < num_types; ++i) {
+            chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
+            std::cout << "chunks in group: " << chunks_in_group[i] << "\n";
+        }
 
-    // read the group offsets
-    std::vector<size_t> group_offsets;
-    for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
-        group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "group offsets: " << group_offsets[i] << "\n";
-    }    
+        size_t chunks_in_group_for_type = chunks_in_group[type_index];
 
-    size_t type_offset = type_offsets[type_index];
-    size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
+        // read the type offsets
+        std::vector<size_t> type_offsets;
+        for (size_t i = 0; i < num_types + 1; ++i) {
+            type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
+            std::cout << "type offsets: " << type_offsets[i] << "\n";
+        }
 
-    std::cout << "searching wavelet tree " << type << " " << num_iters << "\n";
+        // read the group offsets
+        std::vector<size_t> group_offsets;
+        for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
+            group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
+            std::cout << "group offsets: " << group_offsets[i] << "\n";
+        }    
 
-    // go through the groups
-    std::set<size_t> chunks = {};
-    #pragma omp parallel for 
-    for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
+        size_t type_offset = type_offsets[type_index];
+        size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
 
-        // delay this thread by a random number of seconds under 1 second
-        std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
+        std::cout << "searching wavelet tree " << type << " " << num_iters << "\n";
 
-        size_t group_id = (i - type_offset) / 2;
-        size_t group_chunk_offset = group_id * chunks_in_group_for_type;
+        // go through the groups
+        type_chunks[type] = {};
+        #pragma omp parallel for 
+        for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
 
-        size_t wavelet_offset = group_offsets[i];
-        size_t logidx_offset = group_offsets[i + 1];
-        size_t next_wavelet_offset = group_offsets[i + 2];
-        size_t wavelet_size = logidx_offset - wavelet_offset;
-        size_t logidx_size = next_wavelet_offset - logidx_offset;
+            // delay this thread by a random number of seconds under 1 second
+            std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
 
-        // note that each threads operates on a slice, which is a copy with own cursor. 
-        VirtualFileRegion * wavelet_vfr  = vfr->slice(wavelet_offset, wavelet_size);
-        VirtualFileRegion * logidx_vfr = vfr->slice(logidx_offset, logidx_size);
+            size_t group_id = (i - type_offset) / 2;
+            size_t group_chunk_offset = group_id * chunks_in_group_for_type;
 
-        auto matched_pos = search_vfr(wavelet_vfr, logidx_vfr, query);
+            size_t wavelet_offset = group_offsets[i];
+            size_t logidx_offset = group_offsets[i + 1];
+            size_t next_wavelet_offset = group_offsets[i + 2];
+            size_t wavelet_size = logidx_offset - wavelet_offset;
+            size_t logidx_size = next_wavelet_offset - logidx_offset;
 
-        //print out matched_pos
-        #pragma omp critical
-        {
-            for (auto pos : matched_pos) {
-                // std::cout << "pos " << pos << "\n";
-                chunks.insert(group_chunk_offset + pos);
+            // note that each threads operates on a slice, which is a copy with own cursor. 
+            VirtualFileRegion * wavelet_vfr  = vfr->slice(wavelet_offset, wavelet_size);
+            VirtualFileRegion * logidx_vfr = vfr->slice(logidx_offset, logidx_size);
+
+            auto matched_pos = search_vfr(wavelet_vfr, logidx_vfr, query);
+
+            //print out matched_pos
+            #pragma omp critical
+            {
+                for (auto pos : matched_pos) {
+                    type_chunks[type].insert(group_chunk_offset + pos);
+                }
             }
         }
     }
-    return chunks;
+
+    return type_chunks;
 }
 
 std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFileRegion * vfr_oahu, std::string query, size_t limit) {
@@ -591,30 +597,42 @@ std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFil
 
     std::set<size_t> results;
 
+    std::map<int, std::set<size_t>> result =  search_hawaii(vfr_hawaii, types_to_search, query);
+
     // you cannot parallelize this loop here because vfr_hawaii is going to be shared across threads and will have conflicts on the cursor_!
 
-    for (int type: types_to_search) {
+    // print out this result
+    for (auto & item : result) {
+
+        int type = item.first;
+        std::set<size_t> chunks = item.second;
+
+        std::cout << "searching type " << type << "\n";
+        for (size_t chunk : chunks) {
+            std::cout << "chunk " << chunk << "\n";
+        } 
+        
+    }
+
+    for (auto & item : result) {
+
+        int type = item.first;
+        std::set<size_t> chunks = item.second;
 
         std::cout << "searching type " << type << "\n";
         std::vector<plist_size_t> found;
 
-        std::set<size_t> result =  search_hawaii(vfr_hawaii, type, query);
-        for (size_t r : result) {
-            std::cout << r << "\n";
-        }
-
-        if (result == std::set<size_t>{(size_t)-1}) {
+        if (chunks == std::set<size_t>{(size_t)-1}) {
             std::cout << "type not found, brute forcing Oahu\n";
             std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
             std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         } else {
             // only search up to limit chunks
-            std::vector<size_t> result_vec(result.begin(), result.end());
+            std::vector<size_t> result_vec(chunks.begin(), chunks.end());
             std::vector<size_t> chunks_to_search(result_vec.begin(), result_vec.begin() + std::min(result_vec.size(), limit));
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
         }
-
         
         for (plist_size_t r : found) {
             results.insert(r);

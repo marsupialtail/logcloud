@@ -22,10 +22,19 @@ setup(
     ext_modules=[ext_module],
     packages=['rottnest'],  # Change to your package name
     package_data={'rottnest': ['libindex.so']},
+    install_requires=[
+            'pyarrow==12.0.0',
+            'duckdb',
+            'boto3',
+            'pandas',
+            'polars>=0.16.17', # latest version of Polars generally
+            'sqlglot>=11.4.2', # you will be needing sqlglot. not now but eventually
+            'tqdm',
+            ], # add any additional packages that 
     entry_points={
         "console_scripts": [
-            "search=rottnest.search:main",
-            "index=rottnest.index:main"
+            "rottnest-search=rottnest.search:main",
+            "rottnest-index=rottnest.index:main"
         ],
     }, 
 )

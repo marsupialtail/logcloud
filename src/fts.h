@@ -72,7 +72,11 @@ std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegio
             memcpy(log_idx.data(), decompressed_chunk.data(), decompressed_chunk.size());
             // if this is the first chunk, skip to start_idx, if last chunk, stop and end_idx, otherwise add the entire chunk to the results
             if (i == 0) {
-                results.insert(results.end(), log_idx.begin() + start_idx % B, std::min(log_idx.end(), end_idx + log_idx.begin()));
+                if (total_chunks == 1) {
+                    results.insert(results.end(), log_idx.begin() + start_idx % B, log_idx.begin() + end_idx % B);
+                } else {
+                    results.insert(results.end(), log_idx.begin() + start_idx % B, log_idx.end());
+                }
             } else if (i == total_chunks - 1) {
                 results.insert(results.end(), log_idx.begin(), log_idx.begin() + end_idx % B);
             } else {
@@ -112,6 +116,11 @@ std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegio
         wavelet_vfr->reset();
         log_idx_vfr->reset();
     }
+
+    // print out start, end and matched_pos
+    std::cout << "start: " << start << std::endl;
+    std::cout << "end: " << end << std::endl;
+
 
     return matched_pos;
 }

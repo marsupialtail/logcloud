@@ -6,6 +6,7 @@ import ctypes
 import os
 import sys
 import argparse
+import boto3
 
 ROW_GROUPS_IN_FILE = 10
 
@@ -47,9 +48,10 @@ def row_group_search(filenames, row_groups, query, batch_size = 100):
     # return result
 
     logs = [k[2][0] for k in z if k[2] != [[],[]]]
+    logs = [item.cast(pa.large_string()) for sublist in logs for item in sublist]
     if len(logs) == 0:
         return None
-    logs_array = pa.concat_arrays([item.cast(pa.large_string()) for sublist in logs for item in sublist])
+    logs_array = pa.concat_arrays(logs)
 
     result = polars.DataFrame([polars.from_arrow(logs_array)]).filter(polars.col("column_0").str.contains(query))
     result = result.unique()
@@ -68,25 +70,48 @@ def brute_force_search(filenames, query, limit):
             if sum([len(r) for r in results]) > limit:
                 break
     
-    return polars.concat(results)
+    if len(results) > 0:
+        return polars.concat(results)
+    else:
+        return None
 
-def main():
+def count_folders_in_prefix(bucket_name, prefix):
+    s3 = boto3.client('s3')
+    paginator = s3.get_paginator('list_objects_v2')
 
-    parser = argparse.ArgumentParser(description='Search the index')
+    folder_count = 0
+    seen_folders = set()
 
-    parser.add_argument('--index_path', required = True, type=str, help='path to the index')
-    parser.add_argument('--num_splits', required = True, type=int, help='number of splits')
-    parser.add_argument('--query', required = True, type=str, help='query')
-    parser.add_argument('--limit', required = True, type=int, help='limit')
+    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix, Delimiter='/'):
+        for folder in page.get('CommonPrefixes', []):
+            folder_name = folder['Prefix']
+            if folder_name not in seen_folders:
+                seen_folders.add(folder_name)
+                folder_count += 1
 
-    index_path, num_splits, query, limit = parser.parse_args().index_path, parser.parse_args().num_splits, parser.parse_args().query, parser.parse_args().limit
+    return folder_count
 
+def search(index_path, query, limit):
+
+    if index_path[:5] == "s3://":
+        bucket = index_path[5:].split("/")[0]
+        index_name = "/".join(index_path[5:].split("/")[1:]).rstrip("/") + "/"
+        num_splits = count_folders_in_prefix(bucket, index_name + "parquets/")
+    elif index_path[:5] == "gs://" or index_path[:5] == "az://":
+        raise NotImplementedError("GCS and Azure not supported yet")
+    else:
+        num_splits = len(os.listdir(index_path + "/parquets/"))
+
+    print(num_splits)
     lib = PyDLL(os.path.dirname(__file__) + '/libindex.cpython-38-x86_64-linux-gnu.so')
 
     index_path = index_path.rstrip("/")
     split_prefixes = ["split_" + str(i) for i in range(num_splits)]
 
     # read the splits in reverse order 
+
+    all_dfs = []
+
     for split_prefix in split_prefixes[::-1]:
         number_of_files = len(daft.daft.io_glob("{}/parquets/{}/**".format(index_path, split_prefix)))
         filenames = ["{}/parquets/{}/{}.parquet".format(index_path, split_prefix,i) for i in range(number_of_files)]
@@ -106,11 +131,36 @@ def main():
             result = row_group_search(filenames, row_groups, query)
         else:
             result = brute_force_search(filenames, query, limit)
+        
+        if result is not None:
+            all_dfs.append(result)
 
-        result.write_parquet("search_result.parquet")
-
-        if len(result) > limit:
+        if sum([len(i) for i in all_dfs]) > limit:
             break
+    
+    if len(all_dfs) == 0 or sum([len(i) for i in all_dfs]) == 0:
+        return None 
+    else:
+        result = polars.concat(all_dfs)
+        return result
+
+def main():
+
+    parser = argparse.ArgumentParser(description='Search the index')
+    parser.add_argument('--index_path', required = True, type=str, help='path to the index')
+    parser.add_argument('--query', required = True, type=str, help='query')
+    parser.add_argument('--limit', required = True, type=int, help='limit')
+    parser.add_argument('--output', required = False, default='search_result.parquet', type=str, help='output path, e.g. test.parquet')
+
+    index_path, query, limit, output_path = parser.parse_args().index_path, parser.parse_args().query, parser.parse_args().limit, parser.parse_args().output
+
+    result = search(index_path, query, limit)
+
+    if result is None:
+        print("No results found")
+    else:
+        print("Found {} hits, wrote output to {}".format(len(result), output_path))
+        result.write_parquet(output_path)
 
 if __name__ == "__main__":
     main()
