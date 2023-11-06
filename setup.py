@@ -23,7 +23,7 @@ setup(
     packages=['rottnest'],  # Change to your package name
     package_data={'rottnest': ['libindex.so']},
     install_requires=[
-            'daft>=0.1.20',
+            'getdaft>=0.1.20',
             'pyarrow>=7.0.0',
             'duckdb',
             'boto3',
