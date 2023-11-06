@@ -17,8 +17,8 @@ class Vector(ctypes.Structure):
 
 EMPTY = 18446744073709551615
 
-def row_group_search(filenames, row_groups, query, batch_size = 100):
-    
+def row_group_search(filenames, row_groups, query, limit, batch_size = 100):
+
     row_group_keys = {}
     transformed_row_groups = []
     for r in row_groups:
@@ -28,43 +28,40 @@ def row_group_search(filenames, row_groups, query, batch_size = 100):
 
     transformed_row_groups = [[] for i in range(len(filenames))]
     results = []
-    
+
     for key in row_group_keys:
         for i in row_group_keys[key]:
             transformed_row_groups[key].append(i)
 
-    z = daft.daft.read_parquet_into_pyarrow_bulk(filenames, row_groups = transformed_row_groups)
+    result = polars.DataFrame()
+    for i in range(0, len(transformed_row_groups), 10):
+        z = daft.daft.read_parquet_into_pyarrow_bulk(filenames[i:i+10], row_groups = transformed_row_groups[i:i+10])
 
-    # logs = [k[2][1] for k in z if k[2] != [[],[]]]
-    # if len(logs) == 0:
-    #     return None
-    # ts = [k[2][0] for k in z if k[2] != [[],[]]]
-    # logs_array = pa.concat_arrays([item.cast(pa.large_string()) for sublist in logs for item in sublist])
-    # ts_array = pa.concat_arrays([item for sublist in ts for item in sublist])
+        # handle the timestamp some other way!, basically make sure log is indeed [2][0], it may be [2][1] if tehre is ts
 
-    # result = polars.DataFrame([polars.from_arrow(logs_array), polars.from_arrow(ts_array)]).filter(polars.col("column_0").str.contains(query))
-    # result = result.unique()
-    # result = result.rename({"column_0" : "log", "column_1" : "ts"})
-    # return result
+        logs = [k[2][0] for k in z if k[2] != [[],[]]]
+        logs = [item.cast(pa.large_string()) for sublist in logs for item in sublist]
+        if len(logs) == 0:
+            continue
+        logs_array = pa.concat_arrays(logs)
 
-    logs = [k[2][0] for k in z if k[2] != [[],[]]]
-    logs = [item.cast(pa.large_string()) for sublist in logs for item in sublist]
-    if len(logs) == 0:
-        return None
-    logs_array = pa.concat_arrays(logs)
-
-    result = polars.DataFrame([polars.from_arrow(logs_array)]).filter(polars.col("column_0").str.contains(query))
-    result = result.unique()
-    result = result.rename({"column_0" : "log"})
+        result.vstack(polars.DataFrame([polars.from_arrow(logs_array)]).filter(polars.col("column_0").str.contains(query)).unique(), in_place = True)
+        if len(result) > limit:
+            break
+        # result = result.rename({"column_0" : "log"})
     return result
+
 
 def brute_force_search(filenames, query, limit):
 
+    reversed_filenames = filenames[::-1]
     results = []
-    # you should search in reverse order
-    for file in filenames[::-1]:
-        df = polars.read_parquet(file)
-        result = df.filter(df["log"].str.contains(query))
+    # you should search in reverse order in batches of 10
+    for start in range(0, len(reversed_filenames), 10):
+        batch = reversed_filenames[start:start+10]
+        a = daft.daft.read_parquet_into_pyarrow_bulk(batch)
+        df = polars.DataFrame([polars.from_arrow(pa.concat_arrays([pa.concat_arrays(k[2][0]) for k in a]))])
+        result = df.filter(polars.col("column_0").str.contains(query))
         if len(result) > 0:
             results.append(result)
             if sum([len(r) for r in results]) > limit:
@@ -103,7 +100,7 @@ def search(index_path, query, limit):
         num_splits = len(os.listdir(index_path + "/parquets/"))
 
     print(num_splits)
-    lib = PyDLL(os.path.dirname(__file__) + '/libindex.cpython-38-x86_64-linux-gnu.so')
+    lib = PyDLL(os.path.dirname(__file__) + "/libindex.cpython-3{}-x86_64-linux-gnu.so".format(sys.version_info.minor))
 
     index_path = index_path.rstrip("/")
     split_prefixes = ["split_" + str(i) for i in range(num_splits)]
@@ -125,7 +122,7 @@ def search(index_path, query, limit):
         result = lib.search_python(split_index_prefix.encode('utf-8'), query.encode('utf-8'), limit)
 
         row_groups = [result.data[i] for i in range(result.size)]
-        row_groups = sorted(row_groups)
+        row_groups = sorted(list(set(row_groups)))
 
         if row_groups != [EMPTY]:
             result = row_group_search(filenames, row_groups, query)

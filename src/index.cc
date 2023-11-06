@@ -35,7 +35,7 @@ The metadata page will have the following data structures:
 - 8 bytes for each block, denoting block offset
 */
 
-#define BLOCK_BYTE_LIMIT 1000000
+#define BLOCK_BYTE_LIMIT 100000000
 using namespace std;
 
 std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, std::vector<size_t> chunks, std::string query_str) {
@@ -58,22 +58,14 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
 
     // read the number of types
     size_t num_types = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data());
-    std::cout << "num types: " << num_types << "\n";
-
     // read the number of blocks
     size_t num_blocks = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + sizeof(size_t));
-    std::cout << "num blocks: " << num_blocks << "\n";
 
     // read the type order
     std::vector<int> type_order;
     for (size_t i = 0; i < num_types; ++i) {
         type_order.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + i * sizeof(size_t)));
     }
-
-    // print out what are the types
-    // for (int type : type_order) {
-    //     std::cout << type << "\n";
-    // }
 
     // read the type offsets
     std::vector<size_t> type_offsets;
@@ -95,16 +87,9 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
     }
 
     size_t type_index = std::distance(type_order.begin(), it);
-    std::cout << "type index: " << type_index << "\n";
 
     size_t type_offset = type_offsets[type_index];  
     size_t num_chunks = type_offsets.at(type_index + 1) - type_offset;
-
-    std::cout << "num chunks: " << num_chunks << "\n";
-    //print out chunks
-    // for (size_t i = 0; i < chunks.size(); ++i) {
-    //     std::cout << chunks[i] << "\n";
-    // }
 
     // go through the blocks
     std::vector<plist_size_t> row_groups = {};
@@ -497,8 +482,29 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
         std::cout << "type order: " << type_order[i] << "\n";
     }
 
+    std::vector<int> chunks_in_group;
+    for (size_t i = 0; i < num_types; ++i) {
+        chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
+        std::cout << "chunks in group: " << chunks_in_group[i] << "\n";
+    }
+
+    // read the type offsets
+    std::vector<size_t> type_offsets;
+    for (size_t i = 0; i < num_types + 1; ++i) {
+        type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
+        std::cout << "type offsets: " << type_offsets[i] << "\n";
+    }
+
+    // read the group offsets
+    std::vector<size_t> group_offsets;
+    for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
+        group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
+        std::cout << "group offsets: " << group_offsets[i] << "\n";
+    }    
+
     std::map<int, std::set<size_t>> type_chunks = {};
 
+    #pragma omp parallel for 
     for (int type: types) {
 
         auto it = std::find(type_order.begin(), type_order.end(), type);
@@ -510,28 +516,7 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
             continue;
         }
 
-        std::vector<int> chunks_in_group;
-        for (size_t i = 0; i < num_types; ++i) {
-            chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
-            std::cout << "chunks in group: " << chunks_in_group[i] << "\n";
-        }
-
         size_t chunks_in_group_for_type = chunks_in_group[type_index];
-
-        // read the type offsets
-        std::vector<size_t> type_offsets;
-        for (size_t i = 0; i < num_types + 1; ++i) {
-            type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
-            std::cout << "type offsets: " << type_offsets[i] << "\n";
-        }
-
-        // read the group offsets
-        std::vector<size_t> group_offsets;
-        for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
-            group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
-            std::cout << "group offsets: " << group_offsets[i] << "\n";
-        }    
-
         size_t type_offset = type_offsets[type_index];
         size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
 
@@ -539,7 +524,7 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
 
         // go through the groups
         type_chunks[type] = {};
-        #pragma omp parallel for 
+        
         for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
 
             // delay this thread by a random number of seconds under 1 second
@@ -726,6 +711,15 @@ Vector search_python(const char * split_index_prefix, const char * query, size_t
     Vector v = pack_vector(results);
     return v;
 }
+
+void index_python(const char * index_name, size_t num_groups) {
+    std::string index_name_str(index_name);
+    compact(num_groups);
+    write_kauai(index_name_str, num_groups);
+    auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name_str);    
+    write_hawaii(index_name_str, type_chunks, type_uncompressed_lines_in_block);
+}
+
 }
 
 int main(int argc, char *argv[]) {

@@ -11,6 +11,7 @@
 #include <time.h>
 #include <cerrno>
 #include <set>
+#include <cstdarg>
 
 #include <arrow/api.h>
 #include <arrow/status.h>
@@ -547,6 +548,16 @@ arrow::Status RunMain(int argc, char *argv[]) {
     // fclose(fp);
 
     return arrow::Status::OK();
+}
+
+extern "C" {
+// expects index_prefix in the format bucket/index_name/split_id/index_name
+void rex_python(const char * output_template_base, size_t group_number, size_t timestamp_bytes, const char * timestamp_prefix, ...) {
+    std::vector<size_t> results = RunMain(split_index_prefix, query, limit);
+    Vector v = pack_vector(results);
+    return v;
+}
+
 }
 
 int main(int argc, char *argv[]) {

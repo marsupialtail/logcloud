@@ -174,7 +174,7 @@ void S3VirtualFileRegion::vfread(void* buffer, long size) {
     auto get_object_outcome = s3_client_.GetObject(object_request);
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
-    std::cout << "s3 get took " << duration.count() << " milliseconds" << std::endl;
+    // std::cout << "s3 get took " << duration.count() << " milliseconds" << std::endl;
     assert(get_object_outcome.IsSuccess());
     auto &retrieved_data = get_object_outcome.GetResultWithOwnership().GetBody();
     retrieved_data.read(static_cast<char*>(buffer), size);
