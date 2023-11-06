@@ -7,6 +7,7 @@ import os
 import sys
 import argparse
 import boto3
+import time
 
 ROW_GROUPS_IN_FILE = 10
 
@@ -109,6 +110,8 @@ def search(index_path, query, limit):
 
     all_dfs = []
 
+    index_time = 0
+
     for split_prefix in split_prefixes[::-1]:
         number_of_files = len(daft.daft.io_glob("{}/parquets/{}/**".format(index_path, split_prefix)))
         filenames = ["{}/parquets/{}/{}.parquet".format(index_path, split_prefix,i) for i in range(number_of_files)]
@@ -118,14 +121,18 @@ def search(index_path, query, limit):
 
         split_index_prefix = index_path + "/indices/" + split_prefix
 
+        start = time.time()
+
         # the c bindings expect s3://bucket/index_name/split_i as the argument or path/split_i as the argument
         result = lib.search_python(split_index_prefix.encode('utf-8'), query.encode('utf-8'), limit)
+
+        index_time += time.time() - start
 
         row_groups = [result.data[i] for i in range(result.size)]
         row_groups = sorted(list(set(row_groups)))
 
         if row_groups != [EMPTY]:
-            result = row_group_search(filenames, row_groups, query)
+            result = row_group_search(filenames, row_groups, query, limit)
         else:
             result = brute_force_search(filenames, query, limit)
         
@@ -134,6 +141,8 @@ def search(index_path, query, limit):
 
         if sum([len(i) for i in all_dfs]) > limit:
             break
+
+    print("INDEX TIME: {}".format(index_time))
     
     if len(all_dfs) == 0 or sum([len(i) for i in all_dfs]) == 0:
         return None 

@@ -504,8 +504,11 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
 
     std::map<int, std::set<size_t>> type_chunks = {};
 
+    // TODO: this is only correct for S3. Not correct for disk. You need to copy vfr and have each thread operate on a copy.
     #pragma omp parallel for 
     for (int type: types) {
+
+        VirtualFileRegion * local_vfr = vfr->slice(0, vfr->size());
 
         auto it = std::find(type_order.begin(), type_order.end(), type);
         size_t type_index = std::distance(type_order.begin(), it);
@@ -540,8 +543,8 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
             size_t logidx_size = next_wavelet_offset - logidx_offset;
 
             // note that each threads operates on a slice, which is a copy with own cursor. 
-            VirtualFileRegion * wavelet_vfr  = vfr->slice(wavelet_offset, wavelet_size);
-            VirtualFileRegion * logidx_vfr = vfr->slice(logidx_offset, logidx_size);
+            VirtualFileRegion * wavelet_vfr  = local_vfr->slice(wavelet_offset, wavelet_size);
+            VirtualFileRegion * logidx_vfr = local_vfr->slice(logidx_offset, logidx_size);
 
             auto matched_pos = search_vfr(wavelet_vfr, logidx_vfr, query);
 
