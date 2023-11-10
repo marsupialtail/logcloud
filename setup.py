@@ -1,7 +1,5 @@
 from setuptools import setup, Extension
 import os
-import pyarrow
-pyarrow_path = pyarrow.__path__[0]
 
 # Set the CXX environment variable to 'g++' before invoking setup
 os.environ['CXX'] = 'g++'
@@ -21,8 +19,6 @@ ext_module_rex = Extension(
     'rottnest.librex',  # Change 'yourpackage' to your package name
     sources=['src/rex.cc'],
     language = "c++",
-   #  include_dirs=[pyarrow_path + '/include/', 'src'],
-    # library_dirs=[pyarrow_path],
     libraries=['zstd'],
     extra_objects = [ 'src/Trainer.o', 'src/Compressor.o'], 
     extra_compile_args=[ '-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
