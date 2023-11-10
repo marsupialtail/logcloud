@@ -4,8 +4,15 @@ import argparse
 import time
 import logging
 import subprocess
+from ctypes import *
+import ctypes
 
 logging.basicConfig(level=logging.INFO)
+
+def to_c_string_array(py_strings):
+    array = (ctypes.c_char_p * len(py_strings))()
+    array[:] = [s.encode('utf-8') for s in py_strings]
+    return array
 
 def main():
     parser = argparse.ArgumentParser(description='Index with live tail or on-demand.')
@@ -78,10 +85,14 @@ def main():
 
                 # run the indexer
                 parquet_dir = index_name + "/parquets/" + "split_{}/".format(split)
-                command = "./rex " + " ".join(current_files) + " " + index_name + " " + str(group) + " " + str(prefix_bytes) + " '" + prefix_format + "' " + parquet_dir
-                
-                logging.info(command)
-                subprocess.call(["./rex", *current_files, index_name, str(group), str(prefix_bytes), prefix_format, parquet_dir])
+                logging.info("./rex " + " ".join(current_files) + " " + index_name + " " + str(group) + " " + str(prefix_bytes) + " '" + prefix_format + "' " + parquet_dir)
+
+                files = to_c_string_array(current_files)
+                rex = PyDLL(os.path.dirname(__file__) + "/librex.cpython-3{}-x86_64-linux-gnu.so".format(sys.version_info.minor))
+                rex.rex_python.argtypes = [ctypes.c_size_t, ctypes.POINTER(ctypes.c_char_p), ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+                rex.rex_python.restype = None
+
+                rex.rex_python(len(files), files, index_name.encode('utf-8'), group, str(prefix_bytes).encode('utf-8'), prefix_format.encode('utf-8'), parquet_dir.encode('utf-8'))
 
                 group += 1
                 current_size = 0
@@ -89,10 +100,12 @@ def main():
 
                 if current_size_compaction >= compaction_interval * 1024 * 1024 or i == len(files) - 1:
                     # run the compactor
-                    command = "./index index " + index_name + " " + str(group)
-                    logging.info(command)
-                    subprocess.call(["./index", "index", index_name, str(group)])
+                    index = PyDLL(os.path.dirname(__file__) + "/libindex.cpython-3{}-x86_64-linux-gnu.so".format(sys.version_info.minor))
+                    index.index_python.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+                    index.index_python.restype = None
+                    index.index_python(index_name.encode('utf-8'),group)
 
+                    logging.info("./index index " + index_name + " " + str(group))
                     # this will produce index_name.kauai, index_name.oahu, index_name.hawaii in the current directory, move them to the split directory
                     [os.rename(index_name + k, index_name + "/indices/split_{}{}".format(split, k)) for k in [".kauai", ".oahu", ".hawaii"]]
                     

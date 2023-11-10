@@ -35,7 +35,7 @@ The metadata page will have the following data structures:
 - 8 bytes for each block, denoting block offset
 */
 
-#define BLOCK_BYTE_LIMIT 100000000
+#define BLOCK_BYTE_LIMIT 1000000
 using namespace std;
 
 std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, std::vector<size_t> chunks, std::string query_str) {
@@ -504,7 +504,6 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
 
     std::map<int, std::set<size_t>> type_chunks = {};
 
-    // TODO: this is only correct for S3. Not correct for disk. You need to copy vfr and have each thread operate on a copy.
     #pragma omp parallel for 
     for (int type: types) {
 
@@ -713,6 +712,7 @@ Vector search_python(const char * split_index_prefix, const char * query, size_t
     std::vector<size_t> results = search_all(split_index_prefix, query, limit);
     Vector v = pack_vector(results);
     return v;
+
 }
 
 void index_python(const char * index_name, size_t num_groups) {

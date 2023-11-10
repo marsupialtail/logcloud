@@ -11,7 +11,6 @@
 #include <time.h>
 #include <cerrno>
 #include <set>
-#include <cstdarg>
 
 #include <arrow/api.h>
 #include <arrow/status.h>
@@ -157,21 +156,10 @@ arrow::Status write_parquet_file(std::string parquet_files_prefix, std::shared_p
     return arrow::Status::OK();
 }
 
-arrow::Status RunMain(int argc, char *argv[]) {
-
-    // get the number of input files
-    size_t num_input_files = argc - 6;
-    auto files = std::vector<std::string>(argv + 1, argv + argc - 5);
-    std::sort(files.begin(), files.end());
-
-    std::string index_name = std::string(argv[argc - 5]);
-    size_t group_number = std::stoi(argv[argc - 4]);
-    size_t timestamp_bytes = std::stoi(argv[argc - 3]);
-    std::string timestamp_format = argv[argc - 2];
+arrow::Status compress_logs(std::vector<std::string> & files, std::string & index_name, 
+    size_t group_number, size_t timestamp_bytes, std::string & timestamp_format, std::string & parquet_files_prefix) {
 
     std::string template_prefix = "compressed/" + index_name + "_" + std::to_string(group_number);
-    std::string parquet_files_prefix = argv[argc - 1];
-
     std::vector<std::string> buffer;
     std::string line;
 
@@ -197,7 +185,7 @@ arrow::Status RunMain(int argc, char *argv[]) {
     std::vector<size_t> epoch_ts_vector = {};
     std::vector<std::string> log_vector = {};
 
-    for (size_t f = 0; f < num_input_files; ++f) {
+    for (size_t f = 0; f < files.size() ; ++f) {
 
         std::ifstream infile(files[f]);
         if (!infile.is_open()) {
@@ -552,10 +540,22 @@ arrow::Status RunMain(int argc, char *argv[]) {
 
 extern "C" {
 // expects index_prefix in the format bucket/index_name/split_id/index_name
-void rex_python(const char * output_template_base, size_t group_number, size_t timestamp_bytes, const char * timestamp_prefix, ...) {
-    std::vector<size_t> results = RunMain(split_index_prefix, query, limit);
-    Vector v = pack_vector(results);
-    return v;
+void rex_python(size_t number_of_files,  const char ** filenames, const char * index_name, size_t group_number, size_t timestamp_bytes, 
+    const char * timestamp_format, const char * parquet_files_prefix) {
+
+    std::vector<std::string> files;
+    for (size_t i = 0; i < number_of_files; ++i) {
+        files.push_back(std::string(filenames[i]));
+    }
+
+    std::string indexNameStr(index_name);
+    std::string timestampFormatStr(timestamp_format);
+    std::string parquetFilesPrefixStr(parquet_files_prefix);
+
+    arrow::Status s = compress_logs(files, indexNameStr, group_number, timestamp_bytes, timestampFormatStr, parquetFilesPrefixStr);
+    if (!s.ok()) {
+        std::cout << s.ToString() << "\n";
+    }
 }
 
 }
@@ -565,7 +565,19 @@ int main(int argc, char *argv[]) {
         std::cerr << "Usage: " << argv[0] << " <input_filenames> <output_template_base> <group_number> <timestamp_bytes> <timestamp_prefix>\n";
         return -1;
     }
-    arrow::Status s = RunMain(argc, argv);
+
+    // get the number of input files
+    auto files = std::vector<std::string>(argv + 1, argv + argc - 5);
+    std::sort(files.begin(), files.end());
+
+    std::string index_name = std::string(argv[argc - 5]);
+    size_t group_number = std::stoi(argv[argc - 4]);
+    size_t timestamp_bytes = std::stoi(argv[argc - 3]);
+    std::string timestamp_format = argv[argc - 2];
+    std::string parquet_files_prefix = argv[argc - 1];
+
+    arrow::Status s = compress_logs(files, index_name, group_number, timestamp_bytes, timestamp_format, parquet_files_prefix);
+
     if (!s.ok()) {
         std::cout << s.ToString() << "\n";
     }
