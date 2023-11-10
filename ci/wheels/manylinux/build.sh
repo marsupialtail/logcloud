@@ -44,6 +44,7 @@ mkdir wheelhouse
 # Compile wheels
 for PYTHON in ${PYTHONS}; do
     PYBIN="/opt/python/${PYTHON}/bin"
+    "${PYBIN}/pip" install pyarrow==13.0.0
     "${PYBIN}/pip" wheel . --no-deps -w ./wheelhouse/
 done
 
