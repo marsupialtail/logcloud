@@ -21,12 +21,12 @@ ext_module_rex = Extension(
     'rottnest.librex',  # Change 'yourpackage' to your package name
     sources=['src/rex.cc'],
     language = "c++",
-    include_dirs=[pyarrow_path + '/include/', 'src'],
-    library_dirs=[pyarrow_path],
+   #  include_dirs=[pyarrow_path + '/include/', 'src'],
+    # library_dirs=[pyarrow_path],
     libraries=['zstd'],
     extra_objects = [ 'src/Trainer.o', 'src/Compressor.o'], 
     extra_compile_args=[ '-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
-    extra_link_args = ['-lgomp', '-l:libarrow.so.1300', '-l:libparquet.so.1300']
+    extra_link_args = ['-lgomp', '-l:libarrow.so', '-l:libparquet.so']
 )
 
 setup(

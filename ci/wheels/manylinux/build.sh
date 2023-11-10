@@ -11,9 +11,18 @@ function repair_wheel {
     fi
 }
 
-# Install dependencies
 dnf install epel-release -y
 dnf update -y
+yum install -y epel-release || sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-$(cut -d: -f5 /etc/system-release-cpe | cut -d. -f1).noarch.rpm
+yum install -y https://apache.jfrog.io/artifactory/arrow/centos/$(cut -d: -f5 /etc/system-release-cpe | cut -d. -f1)/apache-arrow-release-latest.rpm
+yum install -y --enablerepo=epel arrow-devel # For C++
+yum install -y --enablerepo=epel arrow-glib-devel # For GLib (C)
+yum install -y --enablerepo=epel arrow-dataset-devel # For Apache Arrow Dataset C++
+yum install -y --enablerepo=epel arrow-dataset-glib-devel # For Apache Arrow Dataset GLib (C)
+yum install -y --enablerepo=epel arrow-acero-devel # For Apache Arrow Acero
+yum install -y --enablerepo=epel parquet-devel # For Apache Parquet C++
+yum install -y --enablerepo=epel parquet-glib-devel # For Apache Parquet GLib (C)
+# Install dependencies
 yum install -y spdlog-devel make cmake gcc-c++ unzip zlib-devel openssl-devel libzstd-devel snappy-devel lz4-devel libcurl-devel
 
 git clone https://github.com/aws/aws-sdk-cpp.git
@@ -44,7 +53,6 @@ mkdir wheelhouse
 # Compile wheels
 for PYTHON in ${PYTHONS}; do
     PYBIN="/opt/python/${PYTHON}/bin"
-    "${PYBIN}/pip" install pyarrow==13.0.0
     "${PYBIN}/pip" wheel . --no-deps -w ./wheelhouse/
 done
 
