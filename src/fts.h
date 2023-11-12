@@ -10,6 +10,7 @@
 #include <sstream>
 #include <divsufsort.h>
 #include "wavelet_tree_disk.h"
+#include "glog/logging.h"
 
 #define B (1024 * 1024)
 
@@ -88,38 +89,38 @@ std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegio
 
     };
 
-    std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
-    std::cout << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+    LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
+    LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
     
     auto [start, end] = search_wavelet_tree_file(wavelet_vfr, query.c_str(), query.size());
 
-    std::cout << "num reads: " << wavelet_vfr->num_reads << std::endl;
-    std::cout << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+    LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
+    LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
 
     std::vector<size_t> matched_pos = {};
 
     if ( start == -1 || end == -1) {
-        std::cout << "no matches" << std::endl;
+        LOG(INFO) << "no matches" << std::endl;
         return {(size_t) -1};
     }
 
     if (false) { //(end - start > GIVEUP) {
-        std::cout << "too many matches, giving up" << std::endl;
+        LOG(INFO) << "too many matches, giving up" << std::endl;
         return {(size_t) -1};
     } else {
         std::vector<size_t> pos = batch_log_idx_lookup(start, end);
         matched_pos.insert(matched_pos.end(), pos.begin(), pos.end());
 
         // doesn't actually matter which vfr since these are static variables
-        std::cout << "num reads: " << log_idx_vfr->num_reads << std::endl;
-        std::cout << "num bytes read: " << log_idx_vfr->num_bytes_read << std::endl;
+        LOG(INFO) << "num reads: " << log_idx_vfr->num_reads << std::endl;
+        LOG(INFO) << "num bytes read: " << log_idx_vfr->num_bytes_read << std::endl;
         wavelet_vfr->reset();
         log_idx_vfr->reset();
     }
 
     // print out start, end and matched_pos
-    std::cout << "start: " << start << std::endl;
-    std::cout << "end: " << end << std::endl;
+    LOG(INFO) << "start: " << start << std::endl;
+    LOG(INFO) << "end: " << end << std::endl;
 
 
     return matched_pos;
@@ -131,7 +132,7 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
     // std::vector<std::vector<size_t>> FM_index(ALPHABET, std::vector<size_t>{});
 
     int n = strlen(Text);
-    std::cout << "n:" << n << std::endl;
+    LOG(INFO) << "n:" << n << std::endl;
     // allocate
     int *SA = (int *)malloc(n * sizeof(int));
     // sort
@@ -140,7 +141,7 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
     // since we are doing this for log files, we also need to keep track of *which* log every element of the suffix array points to.
     std::vector<size_t> log_idx (n + 1, 0);
 
-    std::cout << Text[n-1] << std::endl;
+    LOG(INFO) << Text[n-1] << std::endl;
     // assert(Text[n - 1] == '\n');
     //first make an auxiliary structure that records where each newline character is
     std::vector<size_t> newlines = {0};
@@ -150,9 +151,9 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
         }
     }
 
-    std::cout << "detected " << newlines.size() << " logs " << std::endl;
-    std::cout << "block lines " << block_lines << std::endl;
-    std::cout << newlines[newlines.size() - 1] << std::endl;
+    LOG(INFO) << "detected " << newlines.size() << " logs " << std::endl;
+    LOG(INFO) << "block lines " << block_lines << std::endl;
+    LOG(INFO) << newlines[newlines.size() - 1] << std::endl;
     
     std::vector<size_t> total_chars(ALPHABET, 0);
 
@@ -219,7 +220,7 @@ std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_bui
 
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
-    std::cout << "log_idx binary search took " << duration.count() << " milliseconds" << std::endl;
+    LOG(INFO) << "log_idx binary search took " << duration.count() << " milliseconds" << std::endl;
 
     for(int i = 0; i < ALPHABET; i++) {
         for(int j = 0; j < i; j ++)
@@ -249,10 +250,10 @@ void write_log_idx_to_disk(std::vector<size_t> log_idx, FILE * log_idx_fp) {
     }
     // now write the compressed_offsets
     size_t compressed_offsets_byte_offset = ftell(log_idx_fp) - base_offset;
-    std::cout << "log_idx compressed array size: " << compressed_offsets_byte_offset << std::endl;
+    LOG(INFO) << "log_idx compressed array size: " << compressed_offsets_byte_offset << std::endl;
     std::string compressed_offsets = compressor.compress((char *)chunk_offsets.data(), chunk_offsets.size() * sizeof(size_t));
     fwrite(compressed_offsets.data(), 1, compressed_offsets.size(), log_idx_fp);
-    std::cout << "log_idx compressed_offsets size: " << compressed_offsets.size() << std::endl;
+    LOG(INFO) << "log_idx compressed_offsets size: " << compressed_offsets.size() << std::endl;
     // now write 8 bytes, the byte offset
     fwrite(&compressed_offsets_byte_offset, 1, sizeof(size_t), log_idx_fp);
 }

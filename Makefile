@@ -8,7 +8,7 @@ CXXFLAGS = -fopenmp -O3 -g -I aws-sdk-cpp/build/include/ -I libdivsufsort/build/
 LDFLAGS = -L aws-sdk-cpp/build/lib/ -L libdivsufsort/build/lib/
 
 # Libraries to link
-LIBS = -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -llz4 -lsnappy -lzstd
+LIBS = -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -llz4 -lsnappy -lzstd -lglog
 
 # Source files
 SRCS = src/index.cc src/vfr.cc src/kauai.cc src/plist.cc

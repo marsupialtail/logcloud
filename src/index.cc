@@ -1,6 +1,3 @@
-#include "plist.h"
-#include "fts.h"
-#include "vfr.h"
 #include "cassert"
 #include <iostream>
 #include <fstream>
@@ -9,10 +6,15 @@
 #include <filesystem>
 #include <numeric>
 #include <map>
+
+#include "plist.h"
+#include "fts.h"
+#include "vfr.h"
 #include "kauai.h"
 #include "python_interface.h"
 #include "type_util.h"
 #include "compactor.h"
+#include <glog/logging.h>
 
 /*
 This step is going to first discover all the compressed/compacted_type* files
@@ -99,7 +101,7 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
         size_t block_offset = block_offsets[type_offset + chunks[i]];
         size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
         size_t block_size = next_block_offset - block_offset;
-        // std::cout << "block size: " << block_size << "\n";
+        // LOG(INFO) << "block size: " << block_size << "\n";
         // read the block
 
         VirtualFileRegion * local_vfr = vfr->slice(block_offset, block_size );
@@ -110,7 +112,7 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, s
 
         // read the length of the compressed strings
         size_t compressed_strings_length = *reinterpret_cast<const size_t*>(block.data());
-        // std::cout << "compressed strings length: " << compressed_strings_length << "\n";
+        // LOG(INFO) << "compressed strings length: " << compressed_strings_length << "\n";
 
         // read the compressed strings
         std::string compressed_strings = block.substr(sizeof(size_t), compressed_strings_length);
@@ -164,7 +166,7 @@ std::pair<std::map<int, size_t>, std::map<int, size_t>> write_oahu(std::string o
 
     // print out types
     for (int type : types) {
-        std::cout << type << "\n";
+        LOG(INFO) << type << "\n";
     }
 
     std::map<int, size_t> type_uncompressed_lines_in_block = {};
@@ -244,14 +246,14 @@ std::pair<std::map<int, size_t>, std::map<int, size_t>> write_oahu(std::string o
         fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
         blocks_written += 1;
 
-        std::cout << "type: " << type << " blocks written: " << blocks_written << "\n";
+        LOG(INFO) << "type: " << type << " blocks written: " << blocks_written << "\n";
         type_chunks[type] = blocks_written;
 
         byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() + serialized3.size() + sizeof(size_t));
 
         type_offsets.push_back(byte_offsets.size() - 1);
         type_uncompressed_lines_in_block[type] = uncompressed_lines_in_block;
-        std::cout << "type: " << type << " uncompressed lines in block: " << uncompressed_lines_in_block << "\n";
+        LOG(INFO) << "type: " << type << " uncompressed lines in block: " << uncompressed_lines_in_block << "\n";
     }
 
     // write the metadata page
@@ -405,7 +407,7 @@ void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::
 
     // print out groups per type
     // for (auto item: groups_per_type) {
-    //     std::cout << item.first << " " << item.second << "\n";
+    //     LOG(INFO) << item.first << " " << item.second << "\n";
     // }
 
 /*
@@ -469,37 +471,37 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
 
     // read the number of types
     size_t num_types = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data());
-    std::cout << "num types: " << num_types << "\n";
+    LOG(INFO) << "num types: " << num_types << "\n";
 
     // read the number of groups
     size_t num_groups = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + sizeof(size_t));
-    std::cout << "num groups: " << num_groups << "\n";
+    LOG(INFO) << "num groups: " << num_groups << "\n";
 
     // read the type order
     std::vector<int> type_order;
     for (size_t i = 0; i < num_types; ++i) {
         type_order.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "type order: " << type_order[i] << "\n";
+        LOG(INFO) << "type order: " << type_order[i] << "\n";
     }
 
     std::vector<int> chunks_in_group;
     for (size_t i = 0; i < num_types; ++i) {
         chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "chunks in group: " << chunks_in_group[i] << "\n";
+        LOG(INFO) << "chunks in group: " << chunks_in_group[i] << "\n";
     }
 
     // read the type offsets
     std::vector<size_t> type_offsets;
     for (size_t i = 0; i < num_types + 1; ++i) {
         type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "type offsets: " << type_offsets[i] << "\n";
+        LOG(INFO) << "type offsets: " << type_offsets[i] << "\n";
     }
 
     // read the group offsets
     std::vector<size_t> group_offsets;
     for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
         group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
-        std::cout << "group offsets: " << group_offsets[i] << "\n";
+        LOG(INFO) << "group offsets: " << group_offsets[i] << "\n";
     }    
 
     std::map<int, std::set<size_t>> type_chunks = {};
@@ -522,7 +524,7 @@ std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vect
         size_t type_offset = type_offsets[type_index];
         size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
 
-        std::cout << "searching wavelet tree " << type << " " << num_iters << "\n";
+        LOG(INFO) << "searching wavelet tree " << type << " " << num_iters << "\n";
 
         // go through the groups
         type_chunks[type] = {};
@@ -571,15 +573,15 @@ std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFil
         }
     }
 
-    std::cout << "query: " << processed_query << "\n";
+    LOG(INFO) << "query: " << processed_query << "\n";
     
     int query_type = get_type(processed_query.c_str());
-    std::cout << "deduced type: " << query_type << "\n";
+    LOG(INFO) << "deduced type: " << query_type << "\n";
     std::vector<int> types_to_search = get_all_types(query_type);
     
     // print out types to search
     for (int type: types_to_search) {
-        std::cout << "type to search: " << type << "\n";
+        LOG(INFO) << "type to search: " << type << "\n";
     }
 
     std::set<size_t> results;
@@ -594,9 +596,9 @@ std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFil
         int type = item.first;
         std::set<size_t> chunks = item.second;
 
-        std::cout << "searching type " << type << "\n";
+        LOG(INFO) << "searching type " << type << "\n";
         for (size_t chunk : chunks) {
-            std::cout << "chunk " << chunk << "\n";
+            LOG(INFO) << "chunk " << chunk << "\n";
         } 
         
     }
@@ -606,11 +608,11 @@ std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFil
         int type = item.first;
         std::set<size_t> chunks = item.second;
 
-        std::cout << "searching type " << type << "\n";
+        LOG(INFO) << "searching type " << type << "\n";
         std::vector<plist_size_t> found;
 
         if (chunks == std::set<size_t>{(size_t)-1}) {
-            std::cout << "type not found, brute forcing Oahu\n";
+            LOG(INFO) << "type not found, brute forcing Oahu\n";
             std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
             std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
             found = search_oahu(vfr_oahu, type , chunks_to_search, query);
@@ -644,7 +646,7 @@ std::vector<size_t> search_all(std::string split_index_prefix, std::string query
     Aws::InitAPI(options);
 
     // print out the split_index_prefix
-    std::cout << "split_index_prefix: " << split_index_prefix << "\n";
+    LOG(INFO) << "split_index_prefix: " << split_index_prefix << "\n";
 
     Aws::Client::ClientConfiguration clientConfig;
     clientConfig.region = "us-west-2";
@@ -659,8 +661,8 @@ std::vector<size_t> search_all(std::string split_index_prefix, std::string query
         std::string prefix = split_index_prefix.substr(split_index_prefix.find("/") + 1);
 
         // print out the bucket and prefix
-        std::cout << "bucket: " << bucket << "\n";
-        std::cout << "prefix: " << prefix << "\n";
+        LOG(INFO) << "bucket: " << bucket << "\n";
+        LOG(INFO) << "prefix: " << prefix << "\n";
 
         vfr_hawaii = new S3VirtualFileRegion(s3_client, bucket, prefix + ".hawaii", "us-west-2");
         vfr_oahu = new S3VirtualFileRegion(s3_client, bucket, prefix + ".oahu", "us-west-2");
@@ -709,24 +711,37 @@ std::vector<size_t> search_all(std::string split_index_prefix, std::string query
 extern "C" {
 // expects index_prefix in the format bucket/index_name/split_id/index_name
 Vector search_python(const char * split_index_prefix, const char * query, size_t limit) {
+    
+    google::InitGoogleLogging("rottnest");
+
     std::vector<size_t> results = search_all(split_index_prefix, query, limit);
     Vector v = pack_vector(results);
+
+    google::ShutdownGoogleLogging();
+
     return v;
 
 }
 
 void index_python(const char * index_name, size_t num_groups) {
+    
+    google::InitGoogleLogging("rottnest");
+    
     std::string index_name_str(index_name);
     compact(num_groups);
     write_kauai(index_name_str, num_groups);
     auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name_str);    
     write_hawaii(index_name_str, type_chunks, type_uncompressed_lines_in_block);
+
+    google::ShutdownGoogleLogging();
 }
 
 }
 
 int main(int argc, char *argv[]) {
 
+    google::InitGoogleLogging("rottnest");
+    
     std::string mode = argv[1];
 
     // figure out the number of groups by counting how many folders named 0, 1, ... are present in compressed
@@ -743,14 +758,16 @@ int main(int argc, char *argv[]) {
         std::string query = argv[3];
         size_t limit = std::stoul(argv[4]);
         std::vector<size_t> results = search_all(split_index_prefix, query, limit);
-        std::cout << "results: \n";
+        LOG(INFO) << "results: \n";
         for (size_t r : results) {
-            std::cout << r << "\n";
+            LOG(INFO) << r << "\n";
         }
         
     } else {
         std::cout << "Usage: " << argv[0] << " <mode> <optional:query>" << std::endl;
-        return 1;
     }
+
+    google::ShutdownGoogleLogging();
+    return 0;
 
 }

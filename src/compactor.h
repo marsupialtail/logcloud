@@ -13,6 +13,7 @@
 #include "compressor.h"
 #include <cerrno>
 #include <cstring>
+#include <glog/logging.h>
 
 const int ROW_GROUP_SIZE = 100000;
 const double DICT_RATIO_THRESHOLD = 0.5; // if something appears in more than 50% of row groups, then it is a dictionary
@@ -68,8 +69,8 @@ void mergeFiles(const vector<string>& inputFilenames, const vector<string>& inpu
         if (it.empty()) {
             // print out all of currentLines
             for (const string& line : currentLines) {
-                std::cout << "problem";
-                std::cout << line << '\n';
+                LOG(WARNING) << "problem";
+                LOG(WARNING) << line << '\n';
             }
         }
 
@@ -169,7 +170,7 @@ int compact(int num_groups) {
         mergeFiles(inputFilenames, inputFilenamesLinenumbers, outputFilename, outputFilenameLinenumbers, num_row_groups);
     }
 
-    std::cout << "Files merged " << endl;
+    LOG(INFO) << "Files merged " << endl;
 
     return 0;
 }

@@ -10,16 +10,16 @@ ext_module = Extension(
     language = "c++",
     include_dirs=['aws-sdk-cpp/build/include/', 'libdivsufsort/build/include/', 'src'],
     library_dirs=['aws-sdk-cpp/build/lib/', 'aws-sdk-cpp/build/lib64/', 'libdivsufsort/build/lib/'],
-    libraries=['divsufsort', 'aws-cpp-sdk-s3', 'aws-cpp-sdk-core', 'lz4', 'snappy', 'zstd'],
+    libraries=['glog','divsufsort', 'aws-cpp-sdk-s3', 'aws-cpp-sdk-core', 'lz4', 'snappy', 'zstd'],
     extra_compile_args=['-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
     extra_link_args = ['-lgomp']
 )
 
 ext_module_rex = Extension(
     'rottnest.librex',  # Change 'yourpackage' to your package name
-    sources=['src/rex.cc'],
+    sources=['src/tokenize.cc'],
     language = "c++",
-    libraries=['zstd'],
+    libraries=['zstd','glog'],
     extra_objects = [ 'src/Trainer.o', 'src/Compressor.o'], 
     extra_compile_args=[ '-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
     extra_link_args = ['-lgomp', '-l:libarrow.so', '-l:libparquet.so']
@@ -32,7 +32,8 @@ setup(
     ext_modules=[ext_module, ext_module_rex],
     packages=['rottnest'],  # Change to your package name
     package_data={'rottnest': ['libindex.so', 'librex.so']},
-    install_requires=[
+    install_requires=[,
+            'typing_extensions'
             'getdaft>=0.1.20',
             'pyarrow>=7.0.0',
             'duckdb',

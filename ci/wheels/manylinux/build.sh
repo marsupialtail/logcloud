@@ -23,7 +23,7 @@ yum install -y --enablerepo=epel arrow-acero-devel # For Apache Arrow Acero
 yum install -y --enablerepo=epel parquet-devel # For Apache Parquet C++
 yum install -y --enablerepo=epel parquet-glib-devel # For Apache Parquet GLib (C)
 # Install dependencies
-yum install -y spdlog-devel make cmake gcc-c++ unzip zlib-devel openssl-devel libzstd-devel snappy-devel lz4-devel libcurl-devel
+yum install -y glog-devel make cmake gcc-c++ unzip zlib-devel openssl-devel libzstd-devel snappy-devel lz4-devel libcurl-devel
 
 git clone https://github.com/aws/aws-sdk-cpp.git
 cd aws-sdk-cpp/

@@ -1,5 +1,6 @@
 #pragma once
 #include "wavelet_tree_common.h"
+#include "glog/logging.h"
 
 void packBits(std::vector<unsigned char>& packed, const std::vector<bool>& bits) {
     unsigned char currByte = 0;
@@ -57,12 +58,12 @@ void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<si
 
         // compute the code for this character
         char c = i;
-        std::cout << i << " ";
+        LOG(INFO) << i << " ";
         // print out each bit in c
         // for (int j = 0; j < LOG_ALPHABET; j++) {
-        //     std::cout << ((c >> (LOG_ALPHABET - 1 - j)) & 1);
+        //     LOG(INFO) << ((c >> (LOG_ALPHABET - 1 - j)) & 1);
         // }
-        std::cout << std::endl;
+        LOG(INFO) << std::endl;
 
         // now iterate through the chunks
         for (size_t j = 0; j < bitvector.size(); j += CHUNK_BITS) {
@@ -82,24 +83,11 @@ void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<si
             // now pack chunk's bytes on there too
             packBits(packed_chunks, chunk);
 
-            // write out packed_chunks to a file called debug
-            
-            // if (i == 75 && j == 0) {
-            //     FILE *debug = fopen("debug", "wb");
-            //     fwrite(packed_chunks.data(), 1, packed_chunks.size(), debug);
-            //     fclose(debug);
-            // }
-
-            if (ftell(fp) == 10770510) {std::cout << "here" << rank_0 << " " << rank_1 << std::endl;}
             rank_0 += bitvector_rank(chunk, 0, chunk.size());
             rank_1 += bitvector_rank(chunk, 1, chunk.size());
 
-            std::string compressed_chunk = compressor.compress((char*)packed_chunks.data(), packed_chunks.size());
-            // auto compressed_chunk = packed_chunks;
-            
+            std::string compressed_chunk = compressor.compress((char*)packed_chunks.data(), packed_chunks.size());            
             fwrite(compressed_chunk.data(), 1, compressed_chunk.size(), fp);
-
-            // std::cout << "compressed chunk size " << compressed_chunk.size() << " original size " << packed_chunks.size() << std::endl;
             
             offsets.push_back(offsets.back() + compressed_chunk.size());
             total_length += compressed_chunk.size();
@@ -107,13 +95,13 @@ void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<si
         // important: it is offsets.size() - 1, NOT offsets.size()!
         level_offsets.push_back(offsets.size() - 1);
     }
-    std::cout << total_length << std::endl;
-    std::cout << "number of chunks" << offsets.size() << std::endl;
+    LOG(INFO) << total_length << std::endl;
+    LOG(INFO) << "number of chunks" << offsets.size() << std::endl;
     // compress the offsets too
     std::string compressed_offsets = compressor.compress((char *)offsets.data(), offsets.size() * sizeof(size_t));
     size_t compressed_offsets_byte_offset = ftell(fp) - base_offset;
     fwrite(compressed_offsets.data(), 1, compressed_offsets.size(), fp);
-    std::cout << "compressed offsets size " << compressed_offsets.size() << std::endl;
+    LOG(INFO) << "compressed offsets size " << compressed_offsets.size() << std::endl;
 
     std::string compressed_level_offsets = compressor.compress((char *)level_offsets.data(), level_offsets.size() * sizeof(size_t));
     size_t compressed_level_offsets_byte_offset = ftell(fp) - base_offset;
@@ -154,22 +142,22 @@ std::tuple<size_t, size_t> search_wavelet_tree(const wavelet_tree_t & tree, std:
     // use the FM index to search for the probe
     for(int i = Psize - 1; i >= 0; i --) {
         char c  = P[i];
-        std::cout << "c: " << c << std::endl;
+        LOG(INFO) << "c: " << c << std::endl;
         
         start = C[c] + wavelet_tree_rank(tree, c, start);
         end = C[c] + wavelet_tree_rank(tree, c, end);
         if (start >= end) {
-            std::cout << "not found" << std::endl;
+            LOG(INFO) << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
         // if (end - start < 3) {
-        //     std::cout << "early exit" << std::endl;
+        //     LOG(INFO) << "early exit" << std::endl;
         //     return std::make_tuple(start, end);
         // }
     }
-    std::cout << "start: " << start << std::endl;
-    std::cout << "end: " << end << std::endl;
-    std::cout << "range: " << end - start << std::endl;
+    LOG(INFO) << "start: " << start << std::endl;
+    LOG(INFO) << "end: " << end << std::endl;
+    LOG(INFO) << "range: " << end - start << std::endl;
     return std::make_tuple(start, end);
 }
 
@@ -186,10 +174,10 @@ std::tuple<size_t, std::vector<size_t>, std::vector<size_t>, std::vector<size_t>
     size_t compressed_C_byte_offset = data[2];
     size_t n = data[3];
 
-    std::cout << "compressed_offsets_byte_offset: " << compressed_offsets_byte_offset << std::endl;
-    std::cout << "compressed_level_offsets_byte_offset: " << compressed_level_offsets_byte_offset << std::endl;
-    std::cout << "compressed_C_byte_offset: " << compressed_C_byte_offset << std::endl;
-    std::cout << "file size: " << file_size << std::endl;
+    LOG(INFO) << "compressed_offsets_byte_offset: " << compressed_offsets_byte_offset << std::endl;
+    LOG(INFO) << "compressed_level_offsets_byte_offset: " << compressed_level_offsets_byte_offset << std::endl;
+    LOG(INFO) << "compressed_C_byte_offset: " << compressed_C_byte_offset << std::endl;
+    LOG(INFO) << "file size: " << file_size << std::endl;
     // now read in C array
     vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
     buffer.clear();
@@ -282,19 +270,19 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
     // use the FM index to search for the probe
     for(int i = Psize - 1; i >= 0; i --) {
         char c  = P[i];
-        std::cout << "c: " << c << std::endl;
+        LOG(INFO) << "c: " << c << std::endl;
 
         start = C[c] + wavelet_tree_rank_from_file(vfr, level_offsets, offsets, c, start);
         end = C[c] + wavelet_tree_rank_from_file(vfr, level_offsets, offsets, c, end);
-        std::cout << "start: " << start << std::endl;
-        std::cout << "end: " << end << std::endl;
-        std::cout << "range: " << end - start << std::endl;
+        LOG(INFO) << "start: " << start << std::endl;
+        LOG(INFO) << "end: " << end << std::endl;
+        LOG(INFO) << "range: " << end - start << std::endl;
         if (start >= end) {
-            std::cout << "not found" << std::endl;
+            LOG(INFO) << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
         if ( end - start == previous_range) {
-            std::cout << "early exit" << std::endl;
+            LOG(INFO) << "early exit" << std::endl;
             return std::make_tuple(start, end);
         }
         previous_range = end - start;
