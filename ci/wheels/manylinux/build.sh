@@ -63,6 +63,12 @@ for whl in ./wheelhouse/*.whl; do
     repair_wheel "$whl"
 done
 
+for file in ./wheelhouse/*.whl; do
+    py_version=$(echo "$file" | grep -oP 'cp3\d+')
+    new_file=$(echo "$file" | sed "s/linux/manylinux_2_28/")
+    mv "$file" "$new_file"
+done
+
 # Install packages and test
 # for PYTHON in ${PYTHONS}; do
 #     PYBIN="/opt/python/${PYTHON}/bin"

@@ -27,7 +27,7 @@ ext_module_rex = Extension(
 
 setup(
     name='rottnest',  # Change to your package name
-    version='1.0',
+    version='1.0.1',
     description='Description of your package',
     ext_modules=[ext_module, ext_module_rex],
     packages=['rottnest'],  # Change to your package name
