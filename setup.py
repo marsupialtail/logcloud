@@ -32,8 +32,8 @@ setup(
     ext_modules=[ext_module, ext_module_rex],
     packages=['rottnest'],  # Change to your package name
     package_data={'rottnest': ['libindex.so', 'librex.so']},
-    install_requires=[,
-            'typing_extensions'
+    install_requires=[
+            'typing_extensions',
             'getdaft>=0.1.20',
             'pyarrow>=7.0.0',
             'duckdb',
