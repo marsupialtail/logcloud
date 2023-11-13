@@ -281,10 +281,10 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
             LOG(INFO) << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
-        if ( end - start == previous_range) {
-            LOG(INFO) << "early exit" << std::endl;
-            return std::make_tuple(start, end);
-        }
+        // if ( end - start == previous_range) {
+        //     LOG(INFO) << "early exit" << std::endl;
+        //     return std::make_tuple(start, end);
+        // }
         previous_range = end - start;
     }
 
