@@ -17,7 +17,8 @@ ext_module = Extension(
 
 ext_module_rex = Extension(
     'rottnest.librex',  # Change 'yourpackage' to your package name
-    sources=['src/tokenize.cc'],
+    # sources=['src/tokenize.cc'],
+    sources=['src/rex.cc'],
     language = "c++",
     libraries=['zstd','glog'],
     extra_objects = [ 'src/Trainer.o', 'src/Compressor.o'], 
@@ -27,7 +28,7 @@ ext_module_rex = Extension(
 
 setup(
     name='rottnest',  # Change to your package name
-    version='1.0.2',
+    version='1.0.3',
     description='Description of your package',
     ext_modules=[ext_module, ext_module_rex],
     packages=['rottnest'],  # Change to your package name

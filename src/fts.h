@@ -9,23 +9,12 @@
 #include "compressor.h"
 #include <sstream>
 #include <divsufsort.h>
-#include "wavelet_tree_disk.h"
+// #include "wavelet_tree_disk.h"
+#include "wavelet_tree_v2.h"
+
 #include "glog/logging.h"
 
 #define B (1024 * 1024)
-
-void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const wavelet_tree_t & wavelet_tree)
-{
-    for(int i = 0; i < ALPHABET; i++) {
-        if (size_t(FM_index[i].size()) > 0) {std::cout << (char) i << std::endl;}
-        // iterate through the FM indices
-        for (size_t j = 0; j < FM_index[i].size(); j++) {
-            // get the suffix array index
-            size_t idx = FM_index[i][j];
-            std::cout << j << " " << idx << " " << wavelet_tree_rank(wavelet_tree, i, idx) << " " << wavelet_tree_rank(wavelet_tree, i, idx + 1) << std::endl; 
-        }
-    }
-}
 
 #define GIVEUP 100
 
@@ -39,8 +28,6 @@ std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegio
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
     std::cout << "log_idx decompress offsets took " << duration.count() << " milliseconds, this could choke for concurrent requests!" << std::endl;
-
-    
 
     log_idx_vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
     Compressor compressor(CompressionAlgorithm::ZSTD);

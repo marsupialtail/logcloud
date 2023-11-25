@@ -2,6 +2,35 @@
 #include "wavelet_tree_common.h"
 #include "glog/logging.h"
 
+int wavelet_tree_rank(const wavelet_tree_t & tree, char c, size_t pos) {
+    // iterate through the bits of c, most significant first
+    size_t counter = 0;
+    size_t curr_pos = pos;
+    for (int i = 0; i < LOG_ALPHABET; i++) {
+        bool bit = (c >> ( (LOG_ALPHABET - 1) - i)) & 1;
+        const bitvector_t & bitvector = tree[counter];
+        // look for the rank of bit in bitvector at curr_pos
+        curr_pos = bitvector_rank(bitvector, bit, curr_pos);
+        counter *= 2;
+        counter += bit;
+        counter += 1;
+    }
+    return curr_pos;
+}
+
+void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const wavelet_tree_t & wavelet_tree)
+{
+    for(int i = 0; i < ALPHABET; i++) {
+        if (size_t(FM_index[i].size()) > 0) {std::cout << (char) i << std::endl;}
+        // iterate through the FM indices
+        for (size_t j = 0; j < FM_index[i].size(); j++) {
+            // get the suffix array index
+            size_t idx = FM_index[i][j];
+            std::cout << j << " " << idx << " " << wavelet_tree_rank(wavelet_tree, i, idx) << " " << wavelet_tree_rank(wavelet_tree, i, idx + 1) << std::endl; 
+        }
+    }
+}
+
 void packBits(std::vector<unsigned char>& packed, const std::vector<bool>& bits) {
     unsigned char currByte = 0;
     int currBit = 0;
@@ -118,22 +147,6 @@ void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<si
     fwrite(&compressed_C_byte_offset, 1, sizeof(size_t), fp);
     fwrite(&n, 1, sizeof(size_t), fp);
     
-}
-
-int wavelet_tree_rank(const wavelet_tree_t & tree, char c, size_t pos) {
-    // iterate through the bits of c, most significant first
-    size_t counter = 0;
-    size_t curr_pos = pos;
-    for (int i = 0; i < LOG_ALPHABET; i++) {
-        bool bit = (c >> ( (LOG_ALPHABET - 1) - i)) & 1;
-        const bitvector_t & bitvector = tree[counter];
-        // look for the rank of bit in bitvector at curr_pos
-        curr_pos = bitvector_rank(bitvector, bit, curr_pos);
-        counter *= 2;
-        counter += bit;
-        counter += 1;
-    }
-    return curr_pos;
 }
 
 std::tuple<size_t, size_t> search_wavelet_tree(const wavelet_tree_t & tree, std::vector<size_t>& C, const char *P, size_t Psize, size_t n) {
@@ -281,10 +294,10 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
             LOG(INFO) << "not found" << std::endl;
             return std::make_tuple(-1, -1);
         }
-        // if ( end - start == previous_range) {
-        //     LOG(INFO) << "early exit" << std::endl;
-        //     return std::make_tuple(start, end);
-        // }
+        if ( end - start == previous_range) {
+            LOG(INFO) << "early exit" << std::endl;
+            return std::make_tuple(start, end);
+        }
         previous_range = end - start;
     }
 

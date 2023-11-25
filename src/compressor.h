@@ -17,6 +17,9 @@ public:
     explicit Compressor(CompressionAlgorithm algorithm) : algorithm_(algorithm) {}
 
     std::string compress(const char* data, size_t size, int compression_level = 5) {
+        if (size == 0) {
+            return "";
+        }
         switch (algorithm_) {
             case CompressionAlgorithm::ZSTD:
                 return compressZstd(data, size, compression_level);

@@ -4,6 +4,18 @@
 #include <time.h>
 #include <iostream>
 
+/*
+This code will expose two utility functions to Python API -- inferring the length of the timestamp field as well as the format of the timestamp field.
+*/
+
+inline bool isValidTimestamp(size_t timestamp) {
+    // Define minimum and maximum valid epoch times
+    size_t minValidTimestamp = 946684800; // January 1, 2000, 00:00:00 UTC
+    size_t maxValidTimestamp = 2524608000; // January 1, 2050, 00:00:00 UTC
+
+    return (timestamp >= minValidTimestamp && timestamp < maxValidTimestamp);
+}
+
 int main(int argc, char ** argv)
 {
     struct tm tm;
