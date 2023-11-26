@@ -37,7 +37,7 @@ The metadata page will have the following data structures:
 - 8 bytes for each block, denoting block offset
 */
 
-#define BLOCK_BYTE_LIMIT 100000
+#define BLOCK_BYTE_LIMIT 1000000
 using namespace std;
 
 std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, std::vector<size_t> chunks, std::string query_str) {
