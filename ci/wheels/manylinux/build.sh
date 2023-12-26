@@ -30,7 +30,7 @@ cd aws-sdk-cpp/
 git submodule update --init --recursive
 mkdir build
 cd build
-cmake -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX=. -DBUILD_ONLY='s3' -DENABLE_TESTING=OFF ..
+cmake -DCMAKE_BUILD_TYPE="Release" -DCMAKE_PREFIX_PATH=/usr/local/ -DCMAKE_INSTALL_PREFIX=/usr/local/ -DBUILD_ONLY='s3' -DENABLE_TESTING=OFF ..
 make -j8
 make install
 cd ..

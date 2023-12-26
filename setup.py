@@ -8,8 +8,8 @@ ext_module = Extension(
     'rottnest.libindex',  # Change 'yourpackage' to your package name
     sources=['src/index.cc', 'src/vfr.cc', 'src/kauai.cc', 'src/plist.cc'],
     language = "c++",
-    include_dirs=['aws-sdk-cpp/build/include/', 'libdivsufsort/build/include/', 'src'],
-    library_dirs=['aws-sdk-cpp/build/lib/', 'aws-sdk-cpp/build/lib64/', 'libdivsufsort/build/lib/'],
+    include_dirs=['src'],
+    library_dirs=[],
     libraries=['glog','divsufsort', 'aws-cpp-sdk-s3', 'aws-cpp-sdk-core', 'lz4', 'snappy', 'zstd'],
     extra_compile_args=['-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
     extra_link_args = ['-lgomp']
@@ -21,7 +21,7 @@ ext_module_rex = Extension(
     sources=['src/rex.cc'],
     language = "c++",
     libraries=['zstd','glog'],
-    extra_objects = [ 'src/Trainer.o', 'src/Compressor.o'], 
+    extra_objects = [ 'vendored/Trainer.o', 'vendored/Compressor.o'], 
     extra_compile_args=[ '-O3', '-g', '-fPIC','-Wno-sign-compare', '-Wno-strict-prototypes', '-fopenmp', '-std=c++17'], 
     extra_link_args = ['-lgomp', '-l:libarrow.so', '-l:libparquet.so']
 )

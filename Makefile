@@ -2,10 +2,10 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -fopenmp -O3 -g -I vendored/aws-sdk-cpp/build/include/ -I vendored/libdivsufsort/build/include/ -fPIC -std=c++17
+CXXFLAGS = -fopenmp -O3 -g -fPIC -std=c++17
 
 # Linker flags
-LDFLAGS = -L vendored/aws-sdk-cpp/build/lib/ -L vendored/libdivsufsort/build/lib/
+LDFLAGS = 
 
 # Libraries to link
 LIBS = -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -llz4 -lsnappy -lzstd -lglog
