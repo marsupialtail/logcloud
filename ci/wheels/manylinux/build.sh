@@ -40,7 +40,7 @@ git clone https://github.com/y-256/libdivsufsort.git
 cd libdivsufsort
 mkdir build
 cd build
-cmake -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX=. ..
+cmake -DCMAKE_BUILD_TYPE="Release" -DCMAKE_PREFIX_PATH=/usr/local/ -DCMAKE_INSTALL_PREFIX=/usr/local/ ..
 make -j8
 make install
 cd ..
