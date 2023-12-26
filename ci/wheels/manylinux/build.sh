@@ -56,8 +56,6 @@ for PYTHON in ${PYTHONS}; do
     "${PYBIN}/pip" wheel . --no-deps -w ./wheelhouse/
 done
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
-
 # Bundle external shared libraries into the wheels
 for whl in ./wheelhouse/*.whl; do
     repair_wheel "$whl"
