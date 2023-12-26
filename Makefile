@@ -36,4 +36,29 @@ $(LIB): $(OBJS)
 clean:
 	rm -f $(OBJS) $(EXEC) $(LIB)
 
-.PHONY: all clean
+CXXTESTFLAGS = 
+
+TESTS = plist_test compressor_test
+
+# Rule to make all tests
+test: $(TESTS)
+
+# Individual test rules
+plist_test: test/plist_test.cc src/plist.cc
+	$(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ -lzstd -llz4 -lsnappy
+
+# fts_test: test/fts_test.cc src/vfr.cc # Add other dependencies
+#     $(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ # Add necessary libraries
+
+# kauai_test: test/kauai_test.cc src/kauai.cc 
+#     $(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ # Add necessary libraries
+
+compressor_test: test/compressor_test.cc 
+	$(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ -lzstd -llz4 -lsnappy
+
+# Clean test executables
+clean-tests:
+	rm -f $(TESTS)
+
+# Extending the PHONY target
+.PHONY: all clean test clean-tests

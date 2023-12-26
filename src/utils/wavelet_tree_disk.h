@@ -2,7 +2,7 @@
 #include "wavelet_tree_common.h"
 #include "glog/logging.h"
 
-int wavelet_tree_rank(const wavelet_tree_t & tree, char c, size_t pos) {
+int wavelet_tree_rank(const fm_index_t & tree, char c, size_t pos) {
     // iterate through the bits of c, most significant first
     size_t counter = 0;
     size_t curr_pos = pos;
@@ -18,7 +18,7 @@ int wavelet_tree_rank(const wavelet_tree_t & tree, char c, size_t pos) {
     return curr_pos;
 }
 
-void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const wavelet_tree_t & wavelet_tree)
+void check_wavelet_tree(const std::vector<std::vector<size_t>> & FM_index, const fm_index_t & wavelet_tree)
 {
     for(int i = 0; i < ALPHABET; i++) {
         if (size_t(FM_index[i].size()) > 0) {std::cout << (char) i << std::endl;}
@@ -48,7 +48,7 @@ void packBits(std::vector<unsigned char>& packed, const std::vector<bool>& bits)
     }
 }
 
-void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<size_t>& C, size_t n, FILE * fp) {
+void write_fm_index_to_disk(const fm_index_t& tree, const std::vector<size_t>& C, size_t n, FILE * fp) {
     
 
     /*
@@ -149,7 +149,7 @@ void write_wavelet_tree_to_disk(const wavelet_tree_t& tree, const std::vector<si
     
 }
 
-std::tuple<size_t, size_t> search_wavelet_tree(const wavelet_tree_t & tree, std::vector<size_t>& C, const char *P, size_t Psize, size_t n) {
+std::tuple<size_t, size_t> search_wavelet_tree(const fm_index_t & tree, std::vector<size_t>& C, const char *P, size_t Psize, size_t n) {
     size_t start = 0;
     size_t end = n + 1;
     // use the FM index to search for the probe
@@ -304,9 +304,9 @@ std::tuple<size_t, size_t> search_wavelet_tree_file(VirtualFileRegion * vfr, con
     return std::make_tuple(start, end);
 }
 
-wavelet_tree_t construct_wavelet_tree(const char *P, size_t Psize) {
+fm_index_t construct_wavelet_tree(const char *P, size_t Psize) {
 
-    wavelet_tree_t to_hit(ALPHABET);
+    fm_index_t to_hit(ALPHABET);
     for(int idx = 0; idx < Psize; idx++) {
         char c = P[idx];
         // initialize each element in to_hit to be empty vector

@@ -1,773 +1,869 @@
 #include "cassert"
-#include <iostream>
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #include <filesystem>
-#include <numeric>
+#include <fstream>
+#include <iostream>
 #include <map>
+#include <numeric>
+#include <sstream>
 
-#include "plist.h"
+#include "compactor.h"
 #include "fts.h"
-#include "vfr.h"
 #include "kauai.h"
+#include "plist.h"
 #include "python_interface.h"
 #include "type_util.h"
-#include "compactor.h"
+#include "vfr.h"
 #include <glog/logging.h>
 
 /*
 This step is going to first discover all the compressed/compacted_type* files
-For each of the compacted type, we are going to read in the data and write the plists
-each compacted type will have its own blocking parameter, such that the each block is within X bytes compressed
-we need to record all the blocking parameters for each compacted type
-Then we are going to write the compressed blocks for each type into a single file, we need to remember the offset for each block
+For each of the compacted type, we are going to read in the data and write the
+plists each compacted type will have its own blocking parameter, such that the
+each block is within X bytes compressed we need to record all the blocking
+parameters for each compacted type Then we are going to write the compressed
+blocks for each type into a single file, we need to remember the offset for each
+block
 
 The layout of each compressed block
-8 bytes indicating length of compressed strings | compressed strings | compressed posting list. This is not compressed again
+8 bytes indicating length of compressed strings | compressed strings |
+compressed posting list. This is not compressed again
 
 The layout of the entire file
-type_A_block_0 | type_A_block_1 | ... | type_B_block_0 | .... | compressed metadata page | 8 bytes indicating the length of the compressed metadata page
+type_A_block_0 | type_A_block_1 | ... | type_B_block_0 | .... | compressed
+metadata page | 8 bytes indicating the length of the compressed metadata page
 
 The metadata page will have the following data structures:
 - 8 bytes indicating the number of types, N
 - 8 bytes indicating the total number of blocks
-- 8 bytes for each type in a list of length N, indicating the order of the types in the blocks, e.g. 1, 21, 53, 63
-- 8 bytes for each type in a list of length N, indicating the offset into the block-byte-offset array for each type
+- 8 bytes for each type in a list of length N, indicating the order of the types
+in the blocks, e.g. 1, 21, 53, 63
+- 8 bytes for each type in a list of length N, indicating the offset into the
+block-byte-offset array for each type
 - 8 bytes for each block, denoting block offset
 */
 
 #define BLOCK_BYTE_LIMIT 1000000
 using namespace std;
 
-std::vector<plist_size_t> search_oahu(VirtualFileRegion * vfr, int query_type, std::vector<size_t> chunks, std::string query_str) {
-    // read the metadata page
+std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
+                                      std::vector<size_t> chunks,
+                                      std::string query_str) {
+  // read the metadata page
 
-    // read the last 8 bytes to figure out the length of the metadata page
-    vfr->vfseek(-sizeof(size_t), SEEK_END);
-    size_t metadata_page_length;
-    vfr->vfread(&metadata_page_length, sizeof(size_t));
+  // read the last 8 bytes to figure out the length of the metadata page
+  vfr->vfseek(-sizeof(size_t), SEEK_END);
+  size_t metadata_page_length;
+  vfr->vfread(&metadata_page_length, sizeof(size_t));
 
-    // read the metadata page
-    vfr->vfseek(-sizeof(size_t) - metadata_page_length, SEEK_END);
-    std::string metadata_page;
-    metadata_page.resize(metadata_page_length);
-    vfr->vfread(&metadata_page[0], metadata_page_length);
+  // read the metadata page
+  vfr->vfseek(-sizeof(size_t) - metadata_page_length, SEEK_END);
+  std::string metadata_page;
+  metadata_page.resize(metadata_page_length);
+  vfr->vfread(&metadata_page[0], metadata_page_length);
 
-    // decompress the metadata page
-    Compressor compressor(CompressionAlgorithm::ZSTD);
-    std::string decompressed_metadata_page = compressor.decompress(metadata_page);
+  // decompress the metadata page
+  Compressor compressor(CompressionAlgorithm::ZSTD);
+  std::string decompressed_metadata_page = compressor.decompress(metadata_page);
 
-    // read the number of types
-    size_t num_types = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data());
-    // read the number of blocks
-    size_t num_blocks = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + sizeof(size_t));
+  // read the number of types
+  size_t num_types =
+      *reinterpret_cast<const size_t *>(decompressed_metadata_page.data());
+  // read the number of blocks
+  size_t num_blocks = *reinterpret_cast<const size_t *>(
+      decompressed_metadata_page.data() + sizeof(size_t));
 
-    // read the type order
-    std::vector<int> type_order;
-    for (size_t i = 0; i < num_types; ++i) {
-        type_order.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + i * sizeof(size_t)));
+  // read the type order
+  std::vector<int> type_order;
+  for (size_t i = 0; i < num_types; ++i) {
+    type_order.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        i * sizeof(size_t)));
+  }
+
+  // read the type offsets
+  std::vector<size_t> type_offsets;
+  for (size_t i = 0; i < num_types + 1; ++i) {
+    type_offsets.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        num_types * sizeof(size_t) + i * sizeof(size_t)));
+  }
+
+  // read the block offsets
+  std::vector<size_t> block_offsets;
+  for (size_t i = 0; i < num_blocks + 1; ++i) {
+    block_offsets.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        2 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
+  }
+
+  // figure out where in the type_order is query_type
+  auto it = std::find(type_order.begin(), type_order.end(), query_type);
+  // if not found return empty vector
+  if (it == type_order.end()) {
+    return {};
+  }
+
+  size_t type_index = std::distance(type_order.begin(), it);
+
+  size_t type_offset = type_offsets[type_index];
+  size_t num_chunks = type_offsets.at(type_index + 1) - type_offset;
+
+  // go through the blocks
+  std::vector<plist_size_t> row_groups = {};
+
+#pragma omp parallel for
+  for (size_t i = 0; i < std::min(chunks.size(), num_chunks); ++i) {
+    size_t block_offset = block_offsets[type_offset + chunks[i]];
+    size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
+    size_t block_size = next_block_offset - block_offset;
+    // LOG(INFO) << "block size: " << block_size << "\n";
+    // read the block
+
+    VirtualFileRegion *local_vfr = vfr->slice(block_offset, block_size);
+    // vfr->vfseek(block_offset, SEEK_SET);
+    std::string block;
+    block.resize(block_size);
+    local_vfr->vfread(&block[0], block_size);
+
+    // read the length of the compressed strings
+    size_t compressed_strings_length =
+        *reinterpret_cast<const size_t *>(block.data());
+    // LOG(INFO) << "compressed strings length: " << compressed_strings_length
+    // << "\n";
+
+    // read the compressed strings
+    std::string compressed_strings =
+        block.substr(sizeof(size_t), compressed_strings_length);
+    std::string decompressed_strings =
+        compressor.decompress(compressed_strings);
+
+    // read the compressed posting list
+    std::string compressed_plist =
+        block.substr(sizeof(size_t) + compressed_strings_length);
+    PListChunk plist(compressed_plist);
+
+    // decompressed strings will be delimited by \n, figure out which lines
+    // actually contain the query_str
+    std::istringstream iss(decompressed_strings);
+    std::string line;
+    size_t line_number = 0;
+    while (std::getline(iss, line)) {
+      // check if line contains query_str anywhere in the line
+      if (("\n" + line + "\n").find(query_str) != std::string::npos) {
+        // lookup the query string
+        std::vector<plist_size_t> result = plist.lookup(line_number);
+#pragma omp critical
+        { row_groups.insert(row_groups.end(), result.begin(), result.end()); }
+      }
+      ++line_number;
     }
+  }
 
-    // read the type offsets
-    std::vector<size_t> type_offsets;
-    for (size_t i = 0; i < num_types + 1; ++i) {
-        type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
-    }
-
-    // read the block offsets
-    std::vector<size_t> block_offsets;
-    for (size_t i = 0; i < num_blocks + 1; ++i) {
-        block_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
-    }
-
-    // figure out where in the type_order is query_type
-    auto it = std::find(type_order.begin(), type_order.end(), query_type);
-    // if not found return empty vector
-    if (it == type_order.end()) {
-        return {};
-    }
-
-    size_t type_index = std::distance(type_order.begin(), it);
-
-    size_t type_offset = type_offsets[type_index];  
-    size_t num_chunks = type_offsets.at(type_index + 1) - type_offset;
-
-    // go through the blocks
-    std::vector<plist_size_t> row_groups = {};
-
-    #pragma omp parallel for 
-    for (size_t i = 0; i < std::min(chunks.size(), num_chunks); ++i) {
-        size_t block_offset = block_offsets[type_offset + chunks[i]];
-        size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
-        size_t block_size = next_block_offset - block_offset;
-        // LOG(INFO) << "block size: " << block_size << "\n";
-        // read the block
-
-        VirtualFileRegion * local_vfr = vfr->slice(block_offset, block_size );
-        // vfr->vfseek(block_offset, SEEK_SET);
-        std::string block;
-        block.resize(block_size);
-        local_vfr->vfread(&block[0], block_size);
-
-        // read the length of the compressed strings
-        size_t compressed_strings_length = *reinterpret_cast<const size_t*>(block.data());
-        // LOG(INFO) << "compressed strings length: " << compressed_strings_length << "\n";
-
-        // read the compressed strings
-        std::string compressed_strings = block.substr(sizeof(size_t), compressed_strings_length);
-        std::string decompressed_strings = compressor.decompress(compressed_strings);
-
-        // read the compressed posting list
-        std::string compressed_plist = block.substr(sizeof(size_t) + compressed_strings_length);
-        PListChunk plist(compressed_plist);
-
-        // decompressed strings will be delimited by \n, figure out which lines actually contain the query_str
-        std::istringstream iss(decompressed_strings);
-        std::string line;
-        size_t line_number = 0;
-        while (std::getline(iss, line)) {
-            // check if line contains query_str anywhere in the line
-            if (("\n" + line + "\n").find(query_str) != std::string::npos) {
-                // lookup the query string
-                std::vector<plist_size_t> result = plist.lookup(line_number);
-                #pragma omp critical
-                {
-                    row_groups.insert(row_groups.end(), result.begin(), result.end());
-                }
-            }
-            ++line_number;
-        }
-    }
-
-    return row_groups;
+  return row_groups;
 }
 
-std::pair<std::map<int, size_t>, std::map<int, size_t>> write_oahu(std::string output_name) {
+std::pair<std::map<int, size_t>, std::map<int, size_t>>
+write_oahu(std::string output_name) {
 
-    // first figure out the number of types by listing all compressed/compacted_type* files
-    std::vector<int> types;
-    for (const auto & entry : std::filesystem::directory_iterator("compressed")) {
-        std::string path = entry.path();
-        if (path.find("compacted_type") != std::string::npos && path.find("lineno") == std::string::npos) {
-            int type = stoi(path.substr(path.find("compacted_type") + 15));
-            // 0 is for dictionary items. We don't need to process them
-            if (type != 0) {
-                types.push_back(type);
-            }
-        }
+  // first figure out the number of types by listing all
+  // compressed/compacted_type* files
+  std::vector<int> types;
+  for (const auto &entry : std::filesystem::directory_iterator("compressed")) {
+    std::string path = entry.path();
+    if (path.find("compacted_type") != std::string::npos &&
+        path.find("lineno") == std::string::npos) {
+      int type = stoi(path.substr(path.find("compacted_type") + 15));
+      // 0 is for dictionary items. We don't need to process them
+      if (type != 0) {
+        types.push_back(type);
+      }
     }
+  }
 
-    auto compressor = Compressor(CompressionAlgorithm::ZSTD);
+  auto compressor = Compressor(CompressionAlgorithm::ZSTD);
 
-    FILE *fp = fopen((output_name + ".oahu").c_str(), "wb");
-    std::vector<size_t> byte_offsets = {0};
-    std::vector<size_t> type_offsets = {0};
+  FILE *fp = fopen((output_name + ".oahu").c_str(), "wb");
+  std::vector<size_t> byte_offsets = {0};
+  std::vector<size_t> type_offsets = {0};
 
-    // print out types
-    for (int type : types) {
-        LOG(INFO) << type << "\n";
-    }
+  // print out types
+  for (int type : types) {
+    LOG(INFO) << type << "\n";
+  }
 
-    std::map<int, size_t> type_uncompressed_lines_in_block = {};
-    std::map<int ,size_t> type_chunks;
+  std::map<int, size_t> type_uncompressed_lines_in_block = {};
+  std::map<int, size_t> type_chunks;
 
-    // go through the types
-    for (int type : types) {
-        std::string string_file_path = "compressed/compacted_type_" + std::to_string(type);
-        std::string lineno_file_path = "compressed/compacted_type_" + std::to_string(type) + "_lineno";
-        std::ifstream string_file(string_file_path);
-        std::ifstream lineno_file(lineno_file_path);
-        
-        // we are just going to see how many strings can fit under BLOCK_BYTE_LIMIT bytes compressed. The posting list will be tiny compressed.
-        std::string buffer = "";
-        std::vector<std::vector<plist_size_t>> lineno_buffer = {};
+  // go through the types
+  for (int type : types) {
+    std::string string_file_path =
+        "compressed/compacted_type_" + std::to_string(type);
+    std::string lineno_file_path =
+        "compressed/compacted_type_" + std::to_string(type) + "_lineno";
+    std::ifstream string_file(string_file_path);
+    std::ifstream lineno_file(lineno_file_path);
 
-        std::string str_line;
-        std::string lineno_line;
-        size_t uncompressed_lines_in_block = 0;
-        size_t blocks_written = 0;
-        size_t lines_in_buffer = 0;
+    // we are just going to see how many strings can fit under BLOCK_BYTE_LIMIT
+    // bytes compressed. The posting list will be tiny compressed.
+    std::string buffer = "";
+    std::vector<std::vector<plist_size_t>> lineno_buffer = {};
 
-        while (std::getline(string_file, str_line)) {
+    std::string str_line;
+    std::string lineno_line;
+    size_t uncompressed_lines_in_block = 0;
+    size_t blocks_written = 0;
+    size_t lines_in_buffer = 0;
 
-            buffer += str_line + "\n";
-            lines_in_buffer += 1;
+    while (std::getline(string_file, str_line)) {
 
-            std::getline(lineno_file, lineno_line);
+      buffer += str_line + "\n";
+      lines_in_buffer += 1;
 
-            std::istringstream iss(lineno_line);
-            std::vector<plist_size_t> numbers;
-            plist_size_t number;
+      std::getline(lineno_file, lineno_line);
 
-            while (iss >> number) {
-                numbers.push_back(number);
-            }
-            lineno_buffer.push_back(numbers);
+      std::istringstream iss(lineno_line);
+      std::vector<plist_size_t> numbers;
+      plist_size_t number;
 
-            if (uncompressed_lines_in_block == 0 && buffer.size() > BLOCK_BYTE_LIMIT / 2) {
-                // compress the buffer
-                std::string compressed_buffer = compressor.compress(buffer.c_str(), buffer.size());
-                // figure out how many lines you need such that the compressed thing will have size BLOCK_BYTE_LIMIT
-                uncompressed_lines_in_block = ((float) BLOCK_BYTE_LIMIT / (float)compressed_buffer.size()) * lines_in_buffer;
-            }
+      while (iss >> number) {
+        numbers.push_back(number);
+      }
+      lineno_buffer.push_back(numbers);
 
-            if (uncompressed_lines_in_block > 0 && lines_in_buffer == uncompressed_lines_in_block) {
-                // we have a block
-                // compress the buffer
-                std::string compressed_buffer = compressor.compress(buffer.c_str(), buffer.size());
-                PListChunk plist(std::move(lineno_buffer));
-                std::string serialized3 = plist.serialize();
-                // reset the buffer
-                buffer = "";
-                lines_in_buffer = 0;
-                lineno_buffer = {};
-                size_t compressed_buffer_size = compressed_buffer.size();
-                fwrite(&compressed_buffer_size, sizeof(size_t), 1, fp);
-                fwrite(compressed_buffer.c_str(), sizeof(char), compressed_buffer.size(), fp);
-                fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
+      if (uncompressed_lines_in_block == 0 &&
+          buffer.size() > BLOCK_BYTE_LIMIT / 2) {
+        // compress the buffer
+        std::string compressed_buffer =
+            compressor.compress(buffer.c_str(), buffer.size());
+        // figure out how many lines you need such that the compressed thing
+        // will have size BLOCK_BYTE_LIMIT
+        uncompressed_lines_in_block =
+            ((float)BLOCK_BYTE_LIMIT / (float)compressed_buffer.size()) *
+            lines_in_buffer;
+      }
 
-                byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() + serialized3.size() + sizeof(size_t));
-                blocks_written += 1;
-
-            }
-            
-        }
-
-        std::string compressed_buffer = compressor.compress(buffer.c_str(), buffer.size());
+      if (uncompressed_lines_in_block > 0 &&
+          lines_in_buffer == uncompressed_lines_in_block) {
+        // we have a block
+        // compress the buffer
+        std::string compressed_buffer =
+            compressor.compress(buffer.c_str(), buffer.size());
         PListChunk plist(std::move(lineno_buffer));
         std::string serialized3 = plist.serialize();
         // reset the buffer
         buffer = "";
+        lines_in_buffer = 0;
         lineno_buffer = {};
         size_t compressed_buffer_size = compressed_buffer.size();
         fwrite(&compressed_buffer_size, sizeof(size_t), 1, fp);
-        fwrite(compressed_buffer.c_str(), sizeof(char), compressed_buffer.size(), fp);
+        fwrite(compressed_buffer.c_str(), sizeof(char),
+               compressed_buffer.size(), fp);
         fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
+
+        byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() +
+                               serialized3.size() + sizeof(size_t));
         blocks_written += 1;
-
-        LOG(INFO) << "type: " << type << " blocks written: " << blocks_written << "\n";
-        type_chunks[type] = blocks_written;
-
-        byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() + serialized3.size() + sizeof(size_t));
-
-        type_offsets.push_back(byte_offsets.size() - 1);
-        type_uncompressed_lines_in_block[type] = uncompressed_lines_in_block;
-        LOG(INFO) << "type: " << type << " uncompressed lines in block: " << uncompressed_lines_in_block << "\n";
+      }
     }
 
-    // write the metadata page
-    // The metadata page will have the following data structures:
-    // - 8 bytes indicating the number of types, N
-    // - 8 bytes indicating the total number of blocks
-    // - 8 bytes for each type in a list of length N, indicating the order of the types in the blocks, e.g. 1, 21, 53, 63
-    // - 8 bytes for each type in a list of length N, indicating the offset into the block-byte-offset array for each type
-    // - 8 bytes for each block, denoting block offset
-    
-    std::string metadata_page = "";
+    std::string compressed_buffer =
+        compressor.compress(buffer.c_str(), buffer.size());
+    PListChunk plist(std::move(lineno_buffer));
+    std::string serialized3 = plist.serialize();
+    // reset the buffer
+    buffer = "";
+    lineno_buffer = {};
+    size_t compressed_buffer_size = compressed_buffer.size();
+    fwrite(&compressed_buffer_size, sizeof(size_t), 1, fp);
+    fwrite(compressed_buffer.c_str(), sizeof(char), compressed_buffer.size(),
+           fp);
+    fwrite(serialized3.c_str(), sizeof(char), serialized3.size(), fp);
+    blocks_written += 1;
 
-    // write the number of types
-    size_t num_types = types.size();
-    metadata_page += std::string((char *)&num_types, sizeof(size_t));
+    LOG(INFO) << "type: " << type << " blocks written: " << blocks_written
+              << "\n";
+    type_chunks[type] = blocks_written;
 
-    // write the number of blocks
-    size_t num_blocks = byte_offsets.size() - 1;
-    metadata_page += std::string((char *)&num_blocks, sizeof(size_t));
+    byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() +
+                           serialized3.size() + sizeof(size_t));
 
-    // write the type order
-    for (int type : types) {
-        metadata_page += std::string((char *)&type, sizeof(size_t));
-    }
+    type_offsets.push_back(byte_offsets.size() - 1);
+    type_uncompressed_lines_in_block[type] = uncompressed_lines_in_block;
+    LOG(INFO) << "type: " << type
+              << " uncompressed lines in block: " << uncompressed_lines_in_block
+              << "\n";
+  }
 
-    // write the type offsets
-    for (size_t type_offset : type_offsets) {
-        metadata_page += std::string((char *)&type_offset, sizeof(size_t));
-    }
+  // write the metadata page
+  // The metadata page will have the following data structures:
+  // - 8 bytes indicating the number of types, N
+  // - 8 bytes indicating the total number of blocks
+  // - 8 bytes for each type in a list of length N, indicating the order of the
+  // types in the blocks, e.g. 1, 21, 53, 63
+  // - 8 bytes for each type in a list of length N, indicating the offset into
+  // the block-byte-offset array for each type
+  // - 8 bytes for each block, denoting block offset
 
-    // write the block offsets
-    for (size_t byte_offset : byte_offsets) {
-        metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
-    }
+  std::string metadata_page = "";
 
-    // compress the metadata page
-    std::string compressed_metadata_page = compressor.compress(metadata_page.c_str(), metadata_page.size());
-    size_t compressed_metadata_page_size = compressed_metadata_page.size();
+  // write the number of types
+  size_t num_types = types.size();
+  metadata_page += std::string((char *)&num_types, sizeof(size_t));
 
-    // write the compressed metadata page
-    
-    fwrite(compressed_metadata_page.c_str(), sizeof(char), compressed_metadata_page.size(), fp);
-    fwrite(&compressed_metadata_page_size, sizeof(size_t), 1, fp);
+  // write the number of blocks
+  size_t num_blocks = byte_offsets.size() - 1;
+  metadata_page += std::string((char *)&num_blocks, sizeof(size_t));
 
-    fclose(fp);
+  // write the type order
+  for (int type : types) {
+    metadata_page += std::string((char *)&type, sizeof(size_t));
+  }
 
-    return std::make_pair(type_chunks, type_uncompressed_lines_in_block);
+  // write the type offsets
+  for (size_t type_offset : type_offsets) {
+    metadata_page += std::string((char *)&type_offset, sizeof(size_t));
+  }
+
+  // write the block offsets
+  for (size_t byte_offset : byte_offsets) {
+    metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
+  }
+
+  // compress the metadata page
+  std::string compressed_metadata_page =
+      compressor.compress(metadata_page.c_str(), metadata_page.size());
+  size_t compressed_metadata_page_size = compressed_metadata_page.size();
+
+  // write the compressed metadata page
+
+  fwrite(compressed_metadata_page.c_str(), sizeof(char),
+         compressed_metadata_page.size(), fp);
+  fwrite(&compressed_metadata_page_size, sizeof(size_t), 1, fp);
+
+  fclose(fp);
+
+  return std::make_pair(type_chunks, type_uncompressed_lines_in_block);
 }
 
 /*
 The layout for this file:
-type_A_group_0_wavelet | type_A_group_0_logidx | type_A_group_1_wavelet | ... | type_B_group_0_wavelet | ... | compressed metadata page | 8 bytes indicating the length of the compressed metadata page
-It is not expected to have too many groups, since one group is 100MB of the uncompressed term dictionary. 80 GB of original data produces maybe up to 2 GB term dictionaries of each type
-The layout of the compressed metadata page
+type_A_group_0_fm_index | type_A_group_0_logidx | type_A_group_1_fm_index | ...
+| type_B_group_0_fm_index | ... | compressed metadata page | 8 bytes indicating
+the length of the compressed metadata page It is not expected to have too many
+groups, since one group is 100MB of the uncompressed term dictionary. 80 GB of
+original data produces maybe up to 2 GB term dictionaries of each type The
+layout of the compressed metadata page
 - 8 bytes indicating the number of types, N
 - 8 bytes indicating the total number of groups
-- 8 bytes for each type in a list of length N, indicating the order of the types in the blocks, e.g. 1, 21, 53, 63
-- 8 bytes for each type in a list of length N, indicating the offset into the block-byte-offset array for each type
-- 2 x 8 bytes for each group, denoting group offset for wavelet and logidx
+- 8 bytes for each type in a list of length N, indicating the order of the types
+in the blocks, e.g. 1, 21, 53, 63
+- 8 bytes for each type in a list of length N, indicating the offset into the
+block-byte-offset array for each type
+- 2 x 8 bytes for each group, denoting group offset for fm_index and logidx
 
-Remember how the wavelet groups work. Each compacted_type variable is divided into chunks of approximately the same size. 
-Each chunk has a whole number of lines. Some of these chunks could be grouped into a group. A group is 100M, configurable
+Remember how the fm_index groups work. Each compacted_type variable is divided
+into chunks of approximately the same size. Each chunk has a whole number of
+lines. Some of these chunks could be grouped into a group. A group is 100M,
+configurable
 */
 
 #define GROUP_BYTE_LIMIT 500000000
 #define BRUTE_THRESHOLD 5
 
-void write_hawaii(std::string filename, std::map<int, size_t> type_chunks, std::map<int, size_t> type_uncompressed_lines_in_block) {
-    // FILE * fp = fopen(filename.c_str(), "wb");
+void write_hawaii(std::string filename, std::map<int, size_t> type_chunks,
+                  std::map<int, size_t> type_uncompressed_lines_in_block) {
+  // FILE * fp = fopen(filename.c_str(), "wb");
 
-    std::vector<size_t> byte_offsets = {};
-    std::vector<size_t> type_offsets = {0};
-    std::map<int, size_t> groups_per_type;
-    std::map<int, size_t> chunks_in_group_per_type;
+  std::vector<size_t> byte_offsets = {};
+  std::vector<size_t> type_offsets = {0};
+  std::map<int, size_t> groups_per_type;
+  std::map<int, size_t> chunks_in_group_per_type;
 
-    FILE * fp = fopen((filename + ".hawaii").c_str(), "wb");
+  FILE *fp = fopen((filename + ".hawaii").c_str(), "wb");
 
-    for (auto item: type_uncompressed_lines_in_block) {
-        int type = item.first;
-        size_t chunks_written = type_chunks[type];
-        size_t uncompressed_lines_in_block = item.second;
+  for (auto item : type_uncompressed_lines_in_block) {
+    int type = item.first;
+    size_t chunks_written = type_chunks[type];
+    size_t uncompressed_lines_in_block = item.second;
 
-        if (type_chunks[type] < BRUTE_THRESHOLD) {
-            continue;
-        }
-
-        std::string string_file_path = "compressed/compacted_type_" + std::to_string(type);
-        std::ifstream string_file(string_file_path);
-        std::string buffer = "\n";
-
-        std::string str_line;
-        size_t lines_in_buffer = 0;
-        size_t chunks_in_buffer = 0;
-
-        // figure out the size of the compacted_type_* file
-        std::ifstream infile(string_file_path, std::ifstream::ate | std::ifstream::binary);
-        size_t uncompressed_file_size = infile.tellg();
-        infile.close();
-
-        // figure out how many chunks will be 100MB based on total number of chunks (chunks_written) and total file size
-
-        size_t chunks_in_group;
-
-        if(uncompressed_lines_in_block > 0 && chunks_written > 1 && uncompressed_file_size > GROUP_BYTE_LIMIT * 2) {
-            chunks_in_group = (chunks_written / (uncompressed_file_size / GROUP_BYTE_LIMIT)) + 1;
-        } else {
-            chunks_in_group = -1;
-        }
-
-        chunks_in_group_per_type[type] = chunks_in_group;
-
-        size_t total_groups = 1;
-
-        std::vector<std::string> buffers = {};
-
-        while (std::getline(string_file, str_line)) {
-            buffer += str_line + "\n";
-            lines_in_buffer += 1;
-
-            if (chunks_in_group != -1 && lines_in_buffer % uncompressed_lines_in_block == 0) {
-                chunks_in_buffer += 1;
-                if (chunks_in_group != -1 && chunks_in_buffer == chunks_in_group) {
-
-                    auto [wavelet_tree, log_idx, C] = bwt_and_build_wavelet(buffer.data(), uncompressed_lines_in_block);
-
-                    byte_offsets.push_back(ftell(fp));
-                    write_wavelet_tree_to_disk(wavelet_tree, C, buffer.size(), fp);
-                    byte_offsets.push_back(ftell(fp));
-                    write_log_idx_to_disk(log_idx, fp);
-                    
-                    buffer = "";
-                    lines_in_buffer = 0;
-                    chunks_in_buffer = 0;
-                    total_groups += 1;
-                }
-            }
-        }
-
-        auto [wavelet_tree, log_idx, C] = bwt_and_build_wavelet(buffer.data(), uncompressed_lines_in_block);
-        byte_offsets.push_back(ftell(fp));
-        write_wavelet_tree_to_disk(wavelet_tree, C, buffer.size(), fp);
-        byte_offsets.push_back(ftell(fp));
-        write_log_idx_to_disk(log_idx, fp);
-
-        type_offsets.push_back(byte_offsets.size());
-        groups_per_type[type] = total_groups;
-
+    if (type_chunks[type] < BRUTE_THRESHOLD) {
+      continue;
     }
 
+    std::string string_file_path =
+        "compressed/compacted_type_" + std::to_string(type);
+    std::ifstream string_file(string_file_path);
+    std::string buffer = "\n";
+
+    std::string str_line;
+    size_t lines_in_buffer = 0;
+    size_t chunks_in_buffer = 0;
+
+    // figure out the size of the compacted_type_* file
+    std::ifstream infile(string_file_path,
+                         std::ifstream::ate | std::ifstream::binary);
+    size_t uncompressed_file_size = infile.tellg();
+    infile.close();
+
+    // figure out how many chunks will be 100MB based on total number of chunks
+    // (chunks_written) and total file size
+
+    size_t chunks_in_group;
+
+    if (uncompressed_lines_in_block > 0 && chunks_written > 1 &&
+        uncompressed_file_size > GROUP_BYTE_LIMIT * 2) {
+      chunks_in_group =
+          (chunks_written / (uncompressed_file_size / GROUP_BYTE_LIMIT)) + 1;
+    } else {
+      chunks_in_group = -1;
+    }
+
+    chunks_in_group_per_type[type] = chunks_in_group;
+
+    size_t total_groups = 1;
+
+    std::vector<std::string> buffers = {};
+
+    while (std::getline(string_file, str_line)) {
+      buffer += str_line + "\n";
+      lines_in_buffer += 1;
+
+      if (chunks_in_group != -1 &&
+          lines_in_buffer % uncompressed_lines_in_block == 0) {
+        chunks_in_buffer += 1;
+        if (chunks_in_group != -1 && chunks_in_buffer == chunks_in_group) {
+
+          auto [fm_index, log_idx, C] = bwt_and_build_fm_index(
+              buffer.data(), uncompressed_lines_in_block);
+
+          byte_offsets.push_back(ftell(fp));
+          write_fm_index_to_disk(fm_index, C, buffer.size(), fp);
+          byte_offsets.push_back(ftell(fp));
+          write_log_idx_to_disk(log_idx, fp);
+
+          buffer = "";
+          lines_in_buffer = 0;
+          chunks_in_buffer = 0;
+          total_groups += 1;
+        }
+      }
+    }
+
+    auto [fm_index, log_idx, C] =
+        bwt_and_build_fm_index(buffer.data(), uncompressed_lines_in_block);
     byte_offsets.push_back(ftell(fp));
+    write_fm_index_to_disk(fm_index, C, buffer.size(), fp);
+    byte_offsets.push_back(ftell(fp));
+    write_log_idx_to_disk(log_idx, fp);
 
-    // print out groups per type
-    // for (auto item: groups_per_type) {
-    //     LOG(INFO) << item.first << " " << item.second << "\n";
-    // }
+    type_offsets.push_back(byte_offsets.size());
+    groups_per_type[type] = total_groups;
+  }
 
-/*
-Reminder:
-The layout of the compressed metadata page
-- 8 bytes indicating the number of types, N
-- 8 bytes indicating the total number of groups
-- 8 bytes for each type in a list of length N, indicating the order of the types in the blocks, e.g. 1, 21, 53, 63
-- 8 bytes for each type in a list of length N, indicating the number of chunks in a group for type N
-- 8 bytes for each type in a list of length N, indicating the offset into the block-byte-offset array for each type
-- 2 x 8 bytes for each group, denoting group offset for wavelet and logidx
-*/
+  byte_offsets.push_back(ftell(fp));
 
-    std::string metadata_page = "";
+  // print out groups per type
+  // for (auto item: groups_per_type) {
+  //     LOG(INFO) << item.first << " " << item.second << "\n";
+  // }
 
-    size_t num_types = groups_per_type.size();
-    metadata_page += std::string((char *)&num_types, sizeof(size_t));
+  /*
+  Reminder:
+  The layout of the compressed metadata page
+  - 8 bytes indicating the number of types, N
+  - 8 bytes indicating the total number of groups
+  - 8 bytes for each type in a list of length N, indicating the order of the
+  types in the blocks, e.g. 1, 21, 53, 63
+  - 8 bytes for each type in a list of length N, indicating the number of chunks
+  in a group for type N
+  - 8 bytes for each type in a list of length N, indicating the offset into the
+  block-byte-offset array for each type
+  - 2 x 8 bytes for each group, denoting group offset for fm_index and logidx
+  */
 
-    size_t num_groups = byte_offsets.size() / 2;
-    metadata_page += std::string((char *)&num_groups, sizeof(size_t));
+  std::string metadata_page = "";
 
-    for (auto item: groups_per_type) {
-        metadata_page += std::string((char *)&item.first, sizeof(size_t));
-    }
+  size_t num_types = groups_per_type.size();
+  metadata_page += std::string((char *)&num_types, sizeof(size_t));
 
-    for (auto item: chunks_in_group_per_type) {
-        metadata_page += std::string((char *)&item.second, sizeof(size_t));
-    }
+  size_t num_groups = byte_offsets.size() / 2;
+  metadata_page += std::string((char *)&num_groups, sizeof(size_t));
 
-    for (size_t type_offset : type_offsets) {
-        metadata_page += std::string((char *)&type_offset, sizeof(size_t));
-    }
+  for (auto item : groups_per_type) {
+    metadata_page += std::string((char *)&item.first, sizeof(size_t));
+  }
 
-    for (size_t byte_offset : byte_offsets) {
-        metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
-    }
+  for (auto item : chunks_in_group_per_type) {
+    metadata_page += std::string((char *)&item.second, sizeof(size_t));
+  }
 
-    std::string compressed_metadata_page = Compressor(CompressionAlgorithm::ZSTD).compress(metadata_page.c_str(), metadata_page.size());
-    size_t compressed_metadata_page_size = compressed_metadata_page.size();
+  for (size_t type_offset : type_offsets) {
+    metadata_page += std::string((char *)&type_offset, sizeof(size_t));
+  }
 
-    fwrite(compressed_metadata_page.c_str(), sizeof(char), compressed_metadata_page.size(), fp);
-    fwrite(&compressed_metadata_page_size, sizeof(size_t), 1, fp);
-    
-    fclose(fp);
+  for (size_t byte_offset : byte_offsets) {
+    metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
+  }
+
+  std::string compressed_metadata_page =
+      Compressor(CompressionAlgorithm::ZSTD)
+          .compress(metadata_page.c_str(), metadata_page.size());
+  size_t compressed_metadata_page_size = compressed_metadata_page.size();
+
+  fwrite(compressed_metadata_page.c_str(), sizeof(char),
+         compressed_metadata_page.size(), fp);
+  fwrite(&compressed_metadata_page_size, sizeof(size_t), 1, fp);
+
+  fclose(fp);
 }
 
-std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion * vfr, std::vector<int> types, std::string query) {
-    // read in the metadata page size and then the metadata page and then decompress everything
-    
-    vfr->vfseek(-sizeof(size_t), SEEK_END);
-    size_t metadata_page_length;
-    vfr->vfread(&metadata_page_length, sizeof(size_t));
+std::map<int, std::set<size_t>> search_hawaii(VirtualFileRegion *vfr,
+                                              std::vector<int> types,
+                                              std::string query) {
+  // read in the metadata page size and then the metadata page and then
+  // decompress everything
 
-    // read the metadata page
-    vfr->vfseek(-sizeof(size_t) - metadata_page_length, SEEK_END);
-    std::string metadata_page;
-    metadata_page.resize(metadata_page_length);
-    vfr->vfread(&metadata_page[0], metadata_page_length);
-    Compressor compressor(CompressionAlgorithm::ZSTD);
-    std::string decompressed_metadata_page = compressor.decompress(metadata_page);
+  vfr->vfseek(-sizeof(size_t), SEEK_END);
+  size_t metadata_page_length;
+  vfr->vfread(&metadata_page_length, sizeof(size_t));
 
-    // read the number of types
-    size_t num_types = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data());
-    LOG(INFO) << "num types: " << num_types << "\n";
+  // read the metadata page
+  vfr->vfseek(-sizeof(size_t) - metadata_page_length, SEEK_END);
+  std::string metadata_page;
+  metadata_page.resize(metadata_page_length);
+  vfr->vfread(&metadata_page[0], metadata_page_length);
+  Compressor compressor(CompressionAlgorithm::ZSTD);
+  std::string decompressed_metadata_page = compressor.decompress(metadata_page);
 
-    // read the number of groups
-    size_t num_groups = *reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + sizeof(size_t));
-    LOG(INFO) << "num groups: " << num_groups << "\n";
+  // read the number of types
+  size_t num_types =
+      *reinterpret_cast<const size_t *>(decompressed_metadata_page.data());
+  LOG(INFO) << "num types: " << num_types << "\n";
 
-    // read the type order
-    std::vector<int> type_order;
-    for (size_t i = 0; i < num_types; ++i) {
-        type_order.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + i * sizeof(size_t)));
-        LOG(INFO) << "type order: " << type_order[i] << "\n";
+  // read the number of groups
+  size_t num_groups = *reinterpret_cast<const size_t *>(
+      decompressed_metadata_page.data() + sizeof(size_t));
+  LOG(INFO) << "num groups: " << num_groups << "\n";
+
+  // read the type order
+  std::vector<int> type_order;
+  for (size_t i = 0; i < num_types; ++i) {
+    type_order.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        i * sizeof(size_t)));
+    LOG(INFO) << "type order: " << type_order[i] << "\n";
+  }
+
+  std::vector<int> chunks_in_group;
+  for (size_t i = 0; i < num_types; ++i) {
+    chunks_in_group.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        num_types * sizeof(size_t) + i * sizeof(size_t)));
+    LOG(INFO) << "chunks in group: " << chunks_in_group[i] << "\n";
+  }
+
+  // read the type offsets
+  std::vector<size_t> type_offsets;
+  for (size_t i = 0; i < num_types + 1; ++i) {
+    type_offsets.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
+    LOG(INFO) << "type offsets: " << type_offsets[i] << "\n";
+  }
+
+  // read the group offsets
+  std::vector<size_t> group_offsets;
+  for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
+    group_offsets.push_back(*reinterpret_cast<const size_t *>(
+        decompressed_metadata_page.data() + 2 * sizeof(size_t) +
+        3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
+    LOG(INFO) << "group offsets: " << group_offsets[i] << "\n";
+  }
+
+  std::map<int, std::set<size_t>> type_chunks = {};
+
+#pragma omp parallel for
+  for (int type : types) {
+
+    VirtualFileRegion *local_vfr = vfr->slice(0, vfr->size());
+
+    auto it = std::find(type_order.begin(), type_order.end(), type);
+    size_t type_index = std::distance(type_order.begin(), it);
+
+    // if not found return empty
+    if (type_index == num_types) {
+      type_chunks[type] = {(size_t)-1};
+      continue;
     }
 
-    std::vector<int> chunks_in_group;
-    for (size_t i = 0; i < num_types; ++i) {
-        chunks_in_group.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + num_types * sizeof(size_t) + i * sizeof(size_t)));
-        LOG(INFO) << "chunks in group: " << chunks_in_group[i] << "\n";
-    }
+    size_t chunks_in_group_for_type = chunks_in_group[type_index];
+    size_t type_offset = type_offsets[type_index];
+    size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
 
-    // read the type offsets
-    std::vector<size_t> type_offsets;
-    for (size_t i = 0; i < num_types + 1; ++i) {
-        type_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 2 * num_types * sizeof(size_t) + i * sizeof(size_t)));
-        LOG(INFO) << "type offsets: " << type_offsets[i] << "\n";
-    }
+    LOG(INFO) << "searching FM index " << type << " " << num_iters << "\n";
 
-    // read the group offsets
-    std::vector<size_t> group_offsets;
-    for (size_t i = 0; i < num_groups * 2 + 1; ++i) {
-        group_offsets.push_back(*reinterpret_cast<const size_t*>(decompressed_metadata_page.data() + 2 * sizeof(size_t) + 3 * num_types * sizeof(size_t) + sizeof(size_t) + i * sizeof(size_t)));
-        LOG(INFO) << "group offsets: " << group_offsets[i] << "\n";
-    }    
+    // go through the groups
+    type_chunks[type] = {};
 
-    std::map<int, std::set<size_t>> type_chunks = {};
+    for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
 
-    #pragma omp parallel for 
-    for (int type: types) {
+      // delay this thread by a random number of seconds under 1 second
+      std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
 
-        VirtualFileRegion * local_vfr = vfr->slice(0, vfr->size());
+      size_t group_id = (i - type_offset) / 2;
+      size_t group_chunk_offset = group_id * chunks_in_group_for_type;
 
-        auto it = std::find(type_order.begin(), type_order.end(), type);
-        size_t type_index = std::distance(type_order.begin(), it);
+      size_t fm_index_offset = group_offsets[i];
+      size_t logidx_offset = group_offsets[i + 1];
+      size_t next_fm_index_offset = group_offsets[i + 2];
+      size_t fm_index_size = logidx_offset - fm_index_offset;
+      size_t logidx_size = next_fm_index_offset - logidx_offset;
 
-        // if not found return empty
-        if (type_index == num_types) {
-            type_chunks[type] = {(size_t)-1};
-            continue;
+      // note that each threads operates on a slice, which is a copy with own
+      // cursor.
+      VirtualFileRegion *fm_index_vfr =
+          local_vfr->slice(fm_index_offset, fm_index_size);
+      VirtualFileRegion *logidx_vfr =
+          local_vfr->slice(logidx_offset, logidx_size);
+
+      auto matched_pos = search_vfr(fm_index_vfr, logidx_vfr, query);
+
+// print out matched_pos
+#pragma omp critical
+      {
+        for (auto pos : matched_pos) {
+          type_chunks[type].insert(group_chunk_offset + pos);
         }
-
-        size_t chunks_in_group_for_type = chunks_in_group[type_index];
-        size_t type_offset = type_offsets[type_index];
-        size_t num_iters = type_offsets[type_index + 1] - type_offsets[type_index];
-
-        LOG(INFO) << "searching wavelet tree " << type << " " << num_iters << "\n";
-
-        // go through the groups
-        type_chunks[type] = {};
-        
-        for (size_t i = type_offset; i < type_offset + num_iters; i += 2) {
-
-            // delay this thread by a random number of seconds under 1 second
-            std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
-
-            size_t group_id = (i - type_offset) / 2;
-            size_t group_chunk_offset = group_id * chunks_in_group_for_type;
-
-            size_t wavelet_offset = group_offsets[i];
-            size_t logidx_offset = group_offsets[i + 1];
-            size_t next_wavelet_offset = group_offsets[i + 2];
-            size_t wavelet_size = logidx_offset - wavelet_offset;
-            size_t logidx_size = next_wavelet_offset - logidx_offset;
-
-            // note that each threads operates on a slice, which is a copy with own cursor. 
-            VirtualFileRegion * wavelet_vfr  = local_vfr->slice(wavelet_offset, wavelet_size);
-            VirtualFileRegion * logidx_vfr = local_vfr->slice(logidx_offset, logidx_size);
-
-            auto matched_pos = search_vfr(wavelet_vfr, logidx_vfr, query);
-
-            //print out matched_pos
-            #pragma omp critical
-            {
-                for (auto pos : matched_pos) {
-                    type_chunks[type].insert(group_chunk_offset + pos);
-                }
-            }
-        }
+      }
     }
+  }
 
-    return type_chunks;
+  return type_chunks;
 }
 
-std::set<size_t> search_hawaii_oahu( VirtualFileRegion * vfr_hawaii,  VirtualFileRegion * vfr_oahu, std::string query, size_t limit) {
+std::set<size_t> search_hawaii_oahu(VirtualFileRegion *vfr_hawaii,
+                                    VirtualFileRegion *vfr_oahu,
+                                    std::string query, size_t limit) {
 
-    // if split_index_prefix starts with s3://
+  // if split_index_prefix starts with s3://
 
-    std::string processed_query = "";
-    for (int i = 0; i < query.size(); i++) {
-        if (query[i] != '\n') {
-            processed_query += query[i];
-        }
+  std::string processed_query = "";
+  for (int i = 0; i < query.size(); i++) {
+    if (query[i] != '\n') {
+      processed_query += query[i];
     }
+  }
 
-    LOG(INFO) << "query: " << processed_query << "\n";
-    
-    int query_type = get_type(processed_query.c_str());
-    LOG(INFO) << "deduced type: " << query_type << "\n";
-    std::vector<int> types_to_search = get_all_types(query_type);
-    
-    // print out types to search
-    for (int type: types_to_search) {
-        LOG(INFO) << "type to search: " << type << "\n";
+  LOG(INFO) << "query: " << processed_query << "\n";
+
+  int query_type = get_type(processed_query.c_str());
+  LOG(INFO) << "deduced type: " << query_type << "\n";
+  std::vector<int> types_to_search = get_all_types(query_type);
+
+  // print out types to search
+  for (int type : types_to_search) {
+    LOG(INFO) << "type to search: " << type << "\n";
+  }
+
+  std::set<size_t> results;
+
+  std::map<int, std::set<size_t>> result =
+      search_hawaii(vfr_hawaii, types_to_search, query);
+
+  // you cannot parallelize this loop here because vfr_hawaii is going to be
+  // shared across threads and will have conflicts on the cursor_!
+
+  // print out this result
+  for (auto &item : result) {
+
+    int type = item.first;
+    std::set<size_t> chunks = item.second;
+
+    LOG(INFO) << "searching type " << type << "\n";
+    for (size_t chunk : chunks) {
+      LOG(INFO) << "chunk " << chunk << "\n";
     }
+  }
 
-    std::set<size_t> results;
+  for (auto &item : result) {
 
-    std::map<int, std::set<size_t>> result =  search_hawaii(vfr_hawaii, types_to_search, query);
+    int type = item.first;
+    std::set<size_t> chunks = item.second;
 
-    // you cannot parallelize this loop here because vfr_hawaii is going to be shared across threads and will have conflicts on the cursor_!
+    LOG(INFO) << "searching type " << type << "\n";
+    std::vector<plist_size_t> found;
 
-    // print out this result
-    for (auto & item : result) {
-
-        int type = item.first;
-        std::set<size_t> chunks = item.second;
-
-        LOG(INFO) << "searching type " << type << "\n";
-        for (size_t chunk : chunks) {
-            LOG(INFO) << "chunk " << chunk << "\n";
-        } 
-        
-    }
-
-    for (auto & item : result) {
-
-        int type = item.first;
-        std::set<size_t> chunks = item.second;
-
-        LOG(INFO) << "searching type " << type << "\n";
-        std::vector<plist_size_t> found;
-
-        if (chunks == std::set<size_t>{(size_t)-1}) {
-            LOG(INFO) << "type not found, brute forcing Oahu\n";
-            std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
-            std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
-            found = search_oahu(vfr_oahu, type , chunks_to_search, query);
-        } else {
-            // only search up to limit chunks
-            std::vector<size_t> result_vec(chunks.begin(), chunks.end());
-            std::vector<size_t> chunks_to_search(result_vec.begin(), result_vec.begin() + std::min(result_vec.size(), limit));
-            found = search_oahu(vfr_oahu, type , chunks_to_search, query);
-        }
-        
-        for (plist_size_t r : found) {
-            results.insert(r);
-        }   
-        
-    }
-
-    return results;
-}
-
-std::vector<size_t> search_all(std::string split_index_prefix, std::string query, size_t limit) {
-
-    /*
-    Expects a split_index_prefix of the form s3://bucket/index-name/indices/split_id or path/index-name/indices/split_id
-    */
-
-    VirtualFileRegion * vfr_hawaii;
-    VirtualFileRegion * vfr_oahu;
-    VirtualFileRegion * vfr_kauai;
-
-    Aws::SDKOptions options;
-    Aws::InitAPI(options);
-
-    // print out the split_index_prefix
-    LOG(INFO) << "split_index_prefix: " << split_index_prefix << "\n";
-
-    Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = "us-west-2";
-    clientConfig.connectTimeoutMs = 10000; // 10 seconds
-    clientConfig.requestTimeoutMs = 10000; // 10 seconds
-    Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
-
-    if (split_index_prefix.find("s3://") != std::string::npos) {
-
-        split_index_prefix = split_index_prefix.substr(5);
-        std::string bucket = split_index_prefix.substr(0, split_index_prefix.find("/"));
-        std::string prefix = split_index_prefix.substr(split_index_prefix.find("/") + 1);
-
-        // print out the bucket and prefix
-        LOG(INFO) << "bucket: " << bucket << "\n";
-        LOG(INFO) << "prefix: " << prefix << "\n";
-
-        vfr_hawaii = new S3VirtualFileRegion(s3_client, bucket, prefix + ".hawaii", "us-west-2");
-        vfr_oahu = new S3VirtualFileRegion(s3_client, bucket, prefix + ".oahu", "us-west-2");
-        vfr_kauai = new S3VirtualFileRegion(s3_client, bucket, prefix + ".kauai", "us-west-2");
-
+    if (chunks == std::set<size_t>{(size_t)-1}) {
+      LOG(INFO) << "type not found, brute forcing Oahu\n";
+      std::vector<size_t> chunks_to_search(BRUTE_THRESHOLD);
+      std::iota(chunks_to_search.begin(), chunks_to_search.end(), 0);
+      found = search_oahu(vfr_oahu, type, chunks_to_search, query);
     } else {
-        vfr_hawaii = new DiskVirtualFileRegion(split_index_prefix + ".hawaii");
-        vfr_oahu = new DiskVirtualFileRegion(split_index_prefix + ".oahu");
-        vfr_kauai = new DiskVirtualFileRegion(split_index_prefix + ".kauai");
+      // only search up to limit chunks
+      std::vector<size_t> result_vec(chunks.begin(), chunks.end());
+      std::vector<size_t> chunks_to_search(
+          result_vec.begin(),
+          result_vec.begin() + std::min(result_vec.size(), limit));
+      found = search_oahu(vfr_oahu, type, chunks_to_search, query);
     }
 
-    std::pair<int, std::vector<plist_size_t>> result = search_kauai(vfr_kauai, query, 1, limit);
-
-    std::vector<size_t> return_results = {};
-
-    if (result.first == 0) {
-        // you have to brute force
-        
-        return_results.push_back(-1);
-
-    } else if (result.first == 1) 
-    {
-        // have to convert plist_size_t to size_t
-        return_results.insert(return_results.end(), result.second.begin(), result.second.end());
-
-    } else if (result.first == 2) {
-
-        std::vector<size_t> current_results(result.second.begin(), result.second.end());
-        std::set<size_t> next_results = search_hawaii_oahu(vfr_hawaii, vfr_oahu, query, limit);
-        return_results = current_results;
-        return_results.insert(return_results.end(), next_results.begin(), next_results.end());
-        
-    } else {
-        assert(false);
+    for (plist_size_t r : found) {
+      results.insert(r);
     }
+  }
 
-    Aws::ShutdownAPI(options);
-    return return_results;
+  return results;
+}
 
-    free(vfr_hawaii);
-    free(vfr_oahu);
-    free(vfr_kauai);
-    
+std::vector<size_t> search_all(std::string split_index_prefix,
+                               std::string query, size_t limit) {
+
+  /*
+  Expects a split_index_prefix of the form
+  s3://bucket/index-name/indices/split_id or path/index-name/indices/split_id
+  */
+
+  VirtualFileRegion *vfr_hawaii;
+  VirtualFileRegion *vfr_oahu;
+  VirtualFileRegion *vfr_kauai;
+
+  Aws::SDKOptions options;
+  Aws::InitAPI(options);
+
+  // print out the split_index_prefix
+  LOG(INFO) << "split_index_prefix: " << split_index_prefix << "\n";
+
+  Aws::Client::ClientConfiguration clientConfig;
+  clientConfig.region = "us-west-2";
+  clientConfig.connectTimeoutMs = 10000; // 10 seconds
+  clientConfig.requestTimeoutMs = 10000; // 10 seconds
+  Aws::S3::S3Client s3_client = Aws::S3::S3Client(clientConfig);
+
+  if (split_index_prefix.find("s3://") != std::string::npos) {
+
+    split_index_prefix = split_index_prefix.substr(5);
+    std::string bucket =
+        split_index_prefix.substr(0, split_index_prefix.find("/"));
+    std::string prefix =
+        split_index_prefix.substr(split_index_prefix.find("/") + 1);
+
+    // print out the bucket and prefix
+    LOG(INFO) << "bucket: " << bucket << "\n";
+    LOG(INFO) << "prefix: " << prefix << "\n";
+
+    vfr_hawaii = new S3VirtualFileRegion(s3_client, bucket, prefix + ".hawaii",
+                                         "us-west-2");
+    vfr_oahu = new S3VirtualFileRegion(s3_client, bucket, prefix + ".oahu",
+                                       "us-west-2");
+    vfr_kauai = new S3VirtualFileRegion(s3_client, bucket, prefix + ".kauai",
+                                        "us-west-2");
+
+  } else {
+    vfr_hawaii = new DiskVirtualFileRegion(split_index_prefix + ".hawaii");
+    vfr_oahu = new DiskVirtualFileRegion(split_index_prefix + ".oahu");
+    vfr_kauai = new DiskVirtualFileRegion(split_index_prefix + ".kauai");
+  }
+
+  std::pair<int, std::vector<plist_size_t>> result =
+      search_kauai(vfr_kauai, query, 1, limit);
+
+  std::vector<size_t> return_results = {};
+
+  if (result.first == 0) {
+    // you have to brute force
+
+    return_results.push_back(-1);
+
+  } else if (result.first == 1) {
+    // have to convert plist_size_t to size_t
+    return_results.insert(return_results.end(), result.second.begin(),
+                          result.second.end());
+
+  } else if (result.first == 2) {
+
+    std::vector<size_t> current_results(result.second.begin(),
+                                        result.second.end());
+    std::set<size_t> next_results =
+        search_hawaii_oahu(vfr_hawaii, vfr_oahu, query, limit);
+    return_results = current_results;
+    return_results.insert(return_results.end(), next_results.begin(),
+                          next_results.end());
+
+  } else {
+    assert(false);
+  }
+
+  Aws::ShutdownAPI(options);
+  return return_results;
+
+  free(vfr_hawaii);
+  free(vfr_oahu);
+  free(vfr_kauai);
 }
 
 extern "C" {
 // expects index_prefix in the format bucket/index_name/split_id/index_name
-Vector search_python(const char * split_index_prefix, const char * query, size_t limit) {
-    
-    google::InitGoogleLogging("rottnest");
+Vector search_python(const char *split_index_prefix, const char *query,
+                     size_t limit) {
 
-    std::vector<size_t> results = search_all(split_index_prefix, query, limit);
-    Vector v = pack_vector(results);
+  google::InitGoogleLogging("rottnest");
 
-    google::ShutdownGoogleLogging();
+  std::vector<size_t> results = search_all(split_index_prefix, query, limit);
+  Vector v = pack_vector(results);
 
-    return v;
+  google::ShutdownGoogleLogging();
 
+  return v;
 }
 
-void index_python(const char * index_name, size_t num_groups) {
-    
-    google::InitGoogleLogging("rottnest");
-    
-    std::string index_name_str(index_name);
-    compact(num_groups);
-    write_kauai(index_name_str, num_groups);
-    auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name_str);    
-    write_hawaii(index_name_str, type_chunks, type_uncompressed_lines_in_block);
+void index_python(const char *index_name, size_t num_groups) {
 
-    google::ShutdownGoogleLogging();
+  google::InitGoogleLogging("rottnest");
+
+  std::string index_name_str(index_name);
+  compact(num_groups);
+  write_kauai(index_name_str, num_groups);
+  auto [type_chunks, type_uncompressed_lines_in_block] =
+      write_oahu(index_name_str);
+  write_hawaii(index_name_str, type_chunks, type_uncompressed_lines_in_block);
+
+  google::ShutdownGoogleLogging();
 }
-
 }
 
 int main(int argc, char *argv[]) {
 
-    google::InitGoogleLogging("rottnest");
-    
-    std::string mode = argv[1];
+  google::InitGoogleLogging("rottnest");
 
-    // figure out the number of groups by counting how many folders named 0, 1, ... are present in compressed
+  std::string mode = argv[1];
 
-    if (mode == "index") {
-        std::string index_name = argv[2];
-        size_t num_groups = std::stoul(argv[3]);
-        compact(num_groups);
-        write_kauai(index_name, num_groups);
-        auto [type_chunks, type_uncompressed_lines_in_block] = write_oahu(index_name);    
-        write_hawaii(index_name, type_chunks, type_uncompressed_lines_in_block);
-    } else if (mode == "search") {
-        std::string split_index_prefix = argv[2];
-        std::string query = argv[3];
-        size_t limit = std::stoul(argv[4]);
-        std::vector<size_t> results = search_all(split_index_prefix, query, limit);
-        LOG(INFO) << "results: \n";
-        for (size_t r : results) {
-            LOG(INFO) << r << "\n";
-        }
-        
-    } else {
-        std::cout << "Usage: " << argv[0] << " <mode> <optional:query>" << std::endl;
+  // figure out the number of groups by counting how many folders named 0, 1,
+  // ... are present in compressed
+
+  if (mode == "index") {
+    std::string index_name = argv[2];
+    size_t num_groups = std::stoul(argv[3]);
+    compact(num_groups);
+    write_kauai(index_name, num_groups);
+    auto [type_chunks, type_uncompressed_lines_in_block] =
+        write_oahu(index_name);
+    write_hawaii(index_name, type_chunks, type_uncompressed_lines_in_block);
+  } else if (mode == "search") {
+    std::string split_index_prefix = argv[2];
+    std::string query = argv[3];
+    size_t limit = std::stoul(argv[4]);
+    std::vector<size_t> results = search_all(split_index_prefix, query, limit);
+    LOG(INFO) << "results: \n";
+    for (size_t r : results) {
+      LOG(INFO) << r << "\n";
     }
 
-    google::ShutdownGoogleLogging();
-    return 0;
+  } else {
+    std::cout << "Usage: " << argv[0] << " <mode> <optional:query>"
+              << std::endl;
+  }
 
+  google::ShutdownGoogleLogging();
+  return 0;
 }

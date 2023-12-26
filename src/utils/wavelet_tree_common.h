@@ -11,7 +11,7 @@
 #define LOG_ALPHABET 8
 #define CHUNK_BITS (32768)
 typedef std::vector<bool> bitvector_t;
-typedef std::vector<bitvector_t> wavelet_tree_t;
+typedef std::vector<bitvector_t> fm_index_t;
 
 size_t bitvector_rank(const bitvector_t & bitvector, bool bit, size_t pos) {
     // iterate through the bits of bitvector

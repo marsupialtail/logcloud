@@ -1,14 +1,14 @@
+#include "compressor.h"
+#include <cassert>
+#include <divsufsort.h>
+#include <iostream>
+#include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vector>
-#include <iostream>
 #include <tuple>
-#include <cassert>
 #include <unordered_map>
-#include "compressor.h"
-#include <sstream>
-#include <divsufsort.h>
+#include <vector>
 // #include "wavelet_tree_disk.h"
 #include "fm_index.h"
 
@@ -18,229 +18,259 @@
 
 #define GIVEUP 100
 
-std::vector<size_t> search_vfr(VirtualFileRegion * wavelet_vfr, VirtualFileRegion * log_idx_vfr, std::string query) {
-    size_t log_idx_size = log_idx_vfr->size();
-    size_t compressed_offsets_byte_offset;
-    
-    log_idx_vfr->vfseek(-sizeof(size_t), SEEK_END);
-    auto start_time = std::chrono::high_resolution_clock::now();
-    log_idx_vfr->vfread(&compressed_offsets_byte_offset, sizeof(size_t));
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
-    std::cout << "log_idx decompress offsets took " << duration.count() << " milliseconds, this could choke for concurrent requests!" << std::endl;
+std::vector<size_t> search_vfr(VirtualFileRegion *wavelet_vfr,
+                               VirtualFileRegion *log_idx_vfr,
+                               std::string query) {
+  size_t log_idx_size = log_idx_vfr->size();
+  size_t compressed_offsets_byte_offset;
 
-    log_idx_vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
-    Compressor compressor(CompressionAlgorithm::ZSTD);
-    std::string compressed_offsets;
-    compressed_offsets.resize(log_idx_size - compressed_offsets_byte_offset - 8);
-    log_idx_vfr->vfread((void *)compressed_offsets.data(), compressed_offsets.size());
-    std::string decompressed_offsets = compressor.decompress(compressed_offsets);
-    std::vector<size_t> chunk_offsets(decompressed_offsets.size() / sizeof(size_t));
-    memcpy(chunk_offsets.data(), decompressed_offsets.data(), decompressed_offsets.size());
+  log_idx_vfr->vfseek(-sizeof(size_t), SEEK_END);
+  auto start_time = std::chrono::high_resolution_clock::now();
+  log_idx_vfr->vfread(&compressed_offsets_byte_offset, sizeof(size_t));
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::milliseconds>(stop - start_time);
+  std::cout << "log_idx decompress offsets took " << duration.count()
+            << " milliseconds, this could choke for concurrent requests!"
+            << std::endl;
 
-    auto batch_log_idx_lookup = [&chunk_offsets, log_idx_vfr] (size_t start_idx, size_t end_idx){
-        size_t start_chunk_offset = chunk_offsets[start_idx / B];
-        size_t end_chunk_offset = chunk_offsets[end_idx / B + 1];
-        size_t total_chunks = end_idx / B - start_idx / B + 1;
+  log_idx_vfr->vfseek(compressed_offsets_byte_offset, SEEK_SET);
+  Compressor compressor(CompressionAlgorithm::ZSTD);
+  std::string compressed_offsets;
+  compressed_offsets.resize(log_idx_size - compressed_offsets_byte_offset - 8);
+  log_idx_vfr->vfread((void *)compressed_offsets.data(),
+                      compressed_offsets.size());
+  std::string decompressed_offsets = compressor.decompress(compressed_offsets);
+  std::vector<size_t> chunk_offsets(decompressed_offsets.size() /
+                                    sizeof(size_t));
+  memcpy(chunk_offsets.data(), decompressed_offsets.data(),
+         decompressed_offsets.size());
 
-        log_idx_vfr->vfseek(start_chunk_offset, SEEK_SET);
-        std::string compressed_chunks;
-        compressed_chunks.resize(end_chunk_offset - start_chunk_offset);
-        log_idx_vfr->vfread((void *)compressed_chunks.data(), compressed_chunks.size());
-        
-        // this contains possibly multiple chunks! We need to decode them separately
-        std::vector<size_t> results = {};
-        for (int i = 0; i < total_chunks; i++) {
-            size_t chunk_offset = chunk_offsets[start_idx / B + i];
-            std::string compressed_chunk = compressed_chunks.substr(chunk_offset - start_chunk_offset, chunk_offsets[start_idx / B + i + 1] - chunk_offset);
-            compressed_chunk.resize(chunk_offsets[start_idx / B + i + 1] - chunk_offset);
-            Compressor compressor(CompressionAlgorithm::ZSTD);
-            std::string decompressed_chunk = compressor.decompress(compressed_chunk);
-            std::vector<size_t> log_idx(decompressed_chunk.size() / sizeof(size_t));
-            memcpy(log_idx.data(), decompressed_chunk.data(), decompressed_chunk.size());
-            // if this is the first chunk, skip to start_idx, if last chunk, stop and end_idx, otherwise add the entire chunk to the results
-            if (i == 0) {
-                if (total_chunks == 1) {
-                    results.insert(results.end(), log_idx.begin() + start_idx % B, log_idx.begin() + end_idx % B);
-                } else {
-                    results.insert(results.end(), log_idx.begin() + start_idx % B, log_idx.end());
-                }
-            } else if (i == total_chunks - 1) {
-                results.insert(results.end(), log_idx.begin(), log_idx.begin() + end_idx % B);
-            } else {
-                results.insert(results.end(), log_idx.begin(), log_idx.end());
-            }
-        }
+  auto batch_log_idx_lookup = [&chunk_offsets, log_idx_vfr](size_t start_idx,
+                                                            size_t end_idx) {
+    size_t start_chunk_offset = chunk_offsets[start_idx / B];
+    size_t end_chunk_offset = chunk_offsets[end_idx / B + 1];
+    size_t total_chunks = end_idx / B - start_idx / B + 1;
 
-        return results;
+    log_idx_vfr->vfseek(start_chunk_offset, SEEK_SET);
+    std::string compressed_chunks;
+    compressed_chunks.resize(end_chunk_offset - start_chunk_offset);
+    log_idx_vfr->vfread((void *)compressed_chunks.data(),
+                        compressed_chunks.size());
 
-    };
-
-    LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
-    LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
-    
-    auto [start, end] = search_wavelet_tree_file(wavelet_vfr, query.c_str(), query.size());
-
-    LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
-    LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
-
-    std::vector<size_t> matched_pos = {};
-
-    if ( start == -1 || end == -1) {
-        LOG(INFO) << "no matches" << std::endl;
-        return {(size_t) -1};
-    }
-
-    if (false) { //(end - start > GIVEUP) {
-        LOG(INFO) << "too many matches, giving up" << std::endl;
-        return {(size_t) -1};
-    } else {
-        std::vector<size_t> pos = batch_log_idx_lookup(start, end);
-        matched_pos.insert(matched_pos.end(), pos.begin(), pos.end());
-
-        // doesn't actually matter which vfr since these are static variables
-        LOG(INFO) << "num reads: " << log_idx_vfr->num_reads << std::endl;
-        LOG(INFO) << "num bytes read: " << log_idx_vfr->num_bytes_read << std::endl;
-        wavelet_vfr->reset();
-        log_idx_vfr->reset();
-    }
-
-    // print out start, end and matched_pos
-    LOG(INFO) << "start: " << start << std::endl;
-    LOG(INFO) << "end: " << end << std::endl;
-
-
-    return matched_pos;
-}
-
-std::tuple<wavelet_tree_t, std::vector<size_t>, std::vector<size_t>> bwt_and_build_wavelet( char* Text, size_t block_lines = -1) {
-
-    std::vector<size_t> C(ALPHABET, 0);
-    // std::vector<std::vector<size_t>> FM_index(ALPHABET, std::vector<size_t>{});
-
-    int n = strlen(Text);
-    LOG(INFO) << "n:" << n << std::endl;
-    // allocate
-    int *SA = (int *)malloc(n * sizeof(int));
-    // sort
-    divsufsort((unsigned char *)Text, SA,  strlen(Text));
-
-    // since we are doing this for log files, we also need to keep track of *which* log every element of the suffix array points to.
-    std::vector<size_t> log_idx (n + 1, 0);
-
-    LOG(INFO) << Text[n-1] << std::endl;
-    // assert(Text[n - 1] == '\n');
-    //first make an auxiliary structure that records where each newline character is
-    std::vector<size_t> newlines = {0};
-    for (int i = 0; i < n; i++) {
-        if (Text[i] == '\n') {
-            newlines.push_back(i);
-        }
-    }
-
-    LOG(INFO) << "detected " << newlines.size() << " logs " << std::endl;
-    LOG(INFO) << "block lines " << block_lines << std::endl;
-    LOG(INFO) << newlines[newlines.size() - 1] << std::endl;
-    
-    std::vector<size_t> total_chars(ALPHABET, 0);
-
-    // the suffix array does not output the last character as the first character so add it here
-    // FM_index[Text[n - 1]].push_back(0);
-    total_chars[Text[n - 1]] ++;
-
-    // get the second to last element of newlines, since the last element is always the length of the file assuming file ends with "\n"
-    log_idx[0] = newlines[newlines.size() - 2];
-
-    // FILE *debug_fp = fopen("logidx.log", "w");
-    std::vector<char> last_chars = {Text[n - 1]};
-
-    size_t average_bytes_per_line = n / newlines.size();
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-    for(int i = 0; i < n; ++i) {
-        // printf("%c\n", Text[SA[i] - 1]);
-        last_chars.push_back(Text[SA[i] - 1]);
-        char c = Text[SA[i] - 1];
-        // FM_index[c].push_back(i + 1);
-        total_chars[c] ++;
-
-        // int start = 0;
-        // int end = newlines.size() - 1;
-        // int mid = (start + end) / 2;
-        // while (start < end) {
-        //     if (newlines[mid] < SA[i] - 1) {
-        //         start = mid + 1;
-        //     } else {
-        //         end = mid;
-        //     }
-        //     mid = (start + end) / 2;
-        // }
-
-        // int my_guess = (SA[i] - 1) / average_bytes_per_line;
-        // // now only binary search a range around the guess
-        // int start = my_guess > 10000 ? my_guess - 10000 : 0;
-        // int end = std::min((int)newlines.size() - 1, my_guess + 10000);
-        // auto it = std::lower_bound(newlines.begin() + start, newlines.begin() + end, SA[i] - 1);
-
-        // // if not found
-        // if (it - newlines.begin() == end) {
-        //     it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
-        // }
-
-        auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] );
-
-        auto mid = it - newlines.begin() ;
-
-        if (block_lines == -1) {
-            log_idx[i + 1] = newlines[mid - 1];
+    // this contains possibly multiple chunks! We need to decode them separately
+    std::vector<size_t> results = {};
+    for (int i = 0; i < total_chunks; i++) {
+      size_t chunk_offset = chunk_offsets[start_idx / B + i];
+      std::string compressed_chunk = compressed_chunks.substr(
+          chunk_offset - start_chunk_offset,
+          chunk_offsets[start_idx / B + i + 1] - chunk_offset);
+      compressed_chunk.resize(chunk_offsets[start_idx / B + i + 1] -
+                              chunk_offset);
+      Compressor compressor(CompressionAlgorithm::ZSTD);
+      std::string decompressed_chunk = compressor.decompress(compressed_chunk);
+      std::vector<size_t> log_idx(decompressed_chunk.size() / sizeof(size_t));
+      memcpy(log_idx.data(), decompressed_chunk.data(),
+             decompressed_chunk.size());
+      // if this is the first chunk, skip to start_idx, if last chunk, stop and
+      // end_idx, otherwise add the entire chunk to the results
+      if (i == 0) {
+        if (total_chunks == 1) {
+          results.insert(results.end(), log_idx.begin() + start_idx % B,
+                         log_idx.begin() + end_idx % B);
         } else {
-            log_idx[i + 1] = (mid - 1) / block_lines;
+          results.insert(results.end(), log_idx.begin() + start_idx % B,
+                         log_idx.end());
         }
-
-        // TODO: will this work for the first log? Somehow it works, but I don't know why
-        
-        // log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
-        // std::cout << log_idx[i + 1] << std::endl;
-        // fprintf(debug_fp, "%ld\n", log_idx[i+1]); 
-    }
-    // fclose(debug_fp);
-
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop-start_time);
-    LOG(INFO) << "log_idx binary search took " << duration.count() << " milliseconds" << std::endl;
-
-    for(int i = 0; i < ALPHABET; i++) {
-        for(int j = 0; j < i; j ++)
-            // C[i] += FM_index[j].size();
-            C[i] += total_chars[j];
+      } else if (i == total_chunks - 1) {
+        results.insert(results.end(), log_idx.begin(),
+                       log_idx.begin() + end_idx % B);
+      } else {
+        results.insert(results.end(), log_idx.begin(), log_idx.end());
+      }
     }
 
-    
-    wavelet_tree_t wavelet_tree = construct_wavelet_tree(last_chars.data(), n + 1);
+    return results;
+  };
 
-    return std::make_tuple(wavelet_tree, log_idx, C);
-    
+  LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
+  LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+
+  auto [start, end] =
+      search_wavelet_tree_file(wavelet_vfr, query.c_str(), query.size());
+
+  LOG(INFO) << "num reads: " << wavelet_vfr->num_reads << std::endl;
+  LOG(INFO) << "num bytes read: " << wavelet_vfr->num_bytes_read << std::endl;
+
+  std::vector<size_t> matched_pos = {};
+
+  if (start == -1 || end == -1) {
+    LOG(INFO) << "no matches" << std::endl;
+    return {(size_t)-1};
+  }
+
+  if (false) { //(end - start > GIVEUP) {
+    LOG(INFO) << "too many matches, giving up" << std::endl;
+    return {(size_t)-1};
+  } else {
+    std::vector<size_t> pos = batch_log_idx_lookup(start, end);
+    matched_pos.insert(matched_pos.end(), pos.begin(), pos.end());
+
+    // doesn't actually matter which vfr since these are static variables
+    LOG(INFO) << "num reads: " << log_idx_vfr->num_reads << std::endl;
+    LOG(INFO) << "num bytes read: " << log_idx_vfr->num_bytes_read << std::endl;
+    wavelet_vfr->reset();
+    log_idx_vfr->reset();
+  }
+
+  // print out start, end and matched_pos
+  LOG(INFO) << "start: " << start << std::endl;
+  LOG(INFO) << "end: " << end << std::endl;
+
+  return matched_pos;
 }
 
-void write_log_idx_to_disk(std::vector<size_t> log_idx, FILE * log_idx_fp) {
-    std::vector<size_t> chunk_offsets = {0};
-    // iterate over chunks of log_idx_fp with size B, compress each of them, and record the offsets
-    Compressor compressor(CompressionAlgorithm::ZSTD);
+std::tuple<fm_index_t, std::vector<size_t>, std::vector<size_t>>
+bwt_and_build_fm_index(char *Text, size_t block_lines = -1) {
 
-    size_t base_offset = ftell(log_idx_fp);
+  std::vector<size_t> C(ALPHABET, 0);
+  // std::vector<std::vector<size_t>> FM_index(ALPHABET, std::vector<size_t>{});
 
-    for (int i = 0; i < log_idx.size(); i += B) {
-        std::vector<size_t> chunk(log_idx.begin() + i, log_idx.begin() + std::min(i + B, int(log_idx.size())));
-        std::string compressed_chunk = compressor.compress((char *)chunk.data(), chunk.size() * sizeof(size_t), 5);
-        fwrite(compressed_chunk.data(), 1, compressed_chunk.size(), log_idx_fp);
-        chunk_offsets.push_back(chunk_offsets.back() + compressed_chunk.size());
+  int n = strlen(Text);
+  LOG(INFO) << "n:" << n << std::endl;
+  // allocate
+  int *SA = (int *)malloc(n * sizeof(int));
+  // sort
+  divsufsort((unsigned char *)Text, SA, strlen(Text));
+
+  // since we are doing this for log files, we also need to keep track of
+  // *which* log every element of the suffix array points to.
+  std::vector<size_t> log_idx(n + 1, 0);
+
+  LOG(INFO) << Text[n - 1] << std::endl;
+  // assert(Text[n - 1] == '\n');
+  // first make an auxiliary structure that records where each newline character
+  // is
+  std::vector<size_t> newlines = {0};
+  for (int i = 0; i < n; i++) {
+    if (Text[i] == '\n') {
+      newlines.push_back(i);
     }
-    // now write the compressed_offsets
-    size_t compressed_offsets_byte_offset = ftell(log_idx_fp) - base_offset;
-    LOG(INFO) << "log_idx compressed array size: " << compressed_offsets_byte_offset << std::endl;
-    std::string compressed_offsets = compressor.compress((char *)chunk_offsets.data(), chunk_offsets.size() * sizeof(size_t));
-    fwrite(compressed_offsets.data(), 1, compressed_offsets.size(), log_idx_fp);
-    LOG(INFO) << "log_idx compressed_offsets size: " << compressed_offsets.size() << std::endl;
-    // now write 8 bytes, the byte offset
-    fwrite(&compressed_offsets_byte_offset, 1, sizeof(size_t), log_idx_fp);
+  }
+
+  LOG(INFO) << "detected " << newlines.size() << " logs " << std::endl;
+  LOG(INFO) << "block lines " << block_lines << std::endl;
+  LOG(INFO) << newlines[newlines.size() - 1] << std::endl;
+
+  std::vector<size_t> total_chars(ALPHABET, 0);
+
+  // the suffix array does not output the last character as the first character
+  // so add it here FM_index[Text[n - 1]].push_back(0);
+  total_chars[Text[n - 1]]++;
+
+  // get the second to last element of newlines, since the last element is
+  // always the length of the file assuming file ends with "\n"
+  log_idx[0] = newlines[newlines.size() - 2];
+
+  // FILE *debug_fp = fopen("logidx.log", "w");
+  std::vector<char> last_chars = {Text[n - 1]};
+
+  size_t average_bytes_per_line = n / newlines.size();
+
+  auto start_time = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < n; ++i) {
+    // printf("%c\n", Text[SA[i] - 1]);
+    last_chars.push_back(Text[SA[i] - 1]);
+    char c = Text[SA[i] - 1];
+    // FM_index[c].push_back(i + 1);
+    total_chars[c]++;
+
+    // int start = 0;
+    // int end = newlines.size() - 1;
+    // int mid = (start + end) / 2;
+    // while (start < end) {
+    //     if (newlines[mid] < SA[i] - 1) {
+    //         start = mid + 1;
+    //     } else {
+    //         end = mid;
+    //     }
+    //     mid = (start + end) / 2;
+    // }
+
+    // int my_guess = (SA[i] - 1) / average_bytes_per_line;
+    // // now only binary search a range around the guess
+    // int start = my_guess > 10000 ? my_guess - 10000 : 0;
+    // int end = std::min((int)newlines.size() - 1, my_guess + 10000);
+    // auto it = std::lower_bound(newlines.begin() + start, newlines.begin() +
+    // end, SA[i] - 1);
+
+    // // if not found
+    // if (it - newlines.begin() == end) {
+    //     it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] - 1);
+    // }
+
+    auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i]);
+
+    auto mid = it - newlines.begin();
+
+    if (block_lines == -1) {
+      log_idx[i + 1] = newlines[mid - 1];
+    } else {
+      log_idx[i + 1] = (mid - 1) / block_lines;
+    }
+
+    // TODO: will this work for the first log? Somehow it works, but I don't
+    // know why
+
+    // log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
+    // std::cout << log_idx[i + 1] << std::endl;
+    // fprintf(debug_fp, "%ld\n", log_idx[i+1]);
+  }
+  // fclose(debug_fp);
+
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::milliseconds>(stop - start_time);
+  LOG(INFO) << "log_idx binary search took " << duration.count()
+            << " milliseconds" << std::endl;
+
+  for (int i = 0; i < ALPHABET; i++) {
+    for (int j = 0; j < i; j++)
+      // C[i] += FM_index[j].size();
+      C[i] += total_chars[j];
+  }
+
+  fm_index_t wavelet_tree = construct_wavelet_tree(last_chars.data(), n + 1);
+
+  return std::make_tuple(wavelet_tree, log_idx, C);
+}
+
+void write_log_idx_to_disk(std::vector<size_t> log_idx, FILE *log_idx_fp) {
+  std::vector<size_t> chunk_offsets = {0};
+  // iterate over chunks of log_idx_fp with size B, compress each of them, and
+  // record the offsets
+  Compressor compressor(CompressionAlgorithm::ZSTD);
+
+  size_t base_offset = ftell(log_idx_fp);
+
+  for (int i = 0; i < log_idx.size(); i += B) {
+    std::vector<size_t> chunk(log_idx.begin() + i,
+                              log_idx.begin() +
+                                  std::min(i + B, int(log_idx.size())));
+    std::string compressed_chunk = compressor.compress(
+        (char *)chunk.data(), chunk.size() * sizeof(size_t), 5);
+    fwrite(compressed_chunk.data(), 1, compressed_chunk.size(), log_idx_fp);
+    chunk_offsets.push_back(chunk_offsets.back() + compressed_chunk.size());
+  }
+  // now write the compressed_offsets
+  size_t compressed_offsets_byte_offset = ftell(log_idx_fp) - base_offset;
+  LOG(INFO) << "log_idx compressed array size: "
+            << compressed_offsets_byte_offset << std::endl;
+  std::string compressed_offsets = compressor.compress(
+      (char *)chunk_offsets.data(), chunk_offsets.size() * sizeof(size_t));
+  fwrite(compressed_offsets.data(), 1, compressed_offsets.size(), log_idx_fp);
+  LOG(INFO) << "log_idx compressed_offsets size: " << compressed_offsets.size()
+            << std::endl;
+  // now write 8 bytes, the byte offset
+  fwrite(&compressed_offsets_byte_offset, 1, sizeof(size_t), log_idx_fp);
 }
