@@ -2,10 +2,10 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -fopenmp -O3 -g -I aws-sdk-cpp/build/include/ -I libdivsufsort/build/include/ -fPIC -std=c++17
+CXXFLAGS = -fopenmp -O3 -g -I vendored/aws-sdk-cpp/build/include/ -I vendored/libdivsufsort/build/include/ -fPIC -std=c++17
 
 # Linker flags
-LDFLAGS = -L aws-sdk-cpp/build/lib/ -L libdivsufsort/build/lib/
+LDFLAGS = -L vendored/aws-sdk-cpp/build/lib/ -L vendored/libdivsufsort/build/lib/
 
 # Libraries to link
 LIBS = -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -llz4 -lsnappy -lzstd -lglog

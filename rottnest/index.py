@@ -6,7 +6,7 @@ import logging
 import subprocess
 from ctypes import *
 import ctypes
-
+import multiprocessing
 logging.basicConfig(level=logging.INFO)
 
 def to_c_string_array(py_strings):
@@ -27,11 +27,18 @@ def compress_files(current_files, index_name, group, prefix_bytes, prefix_format
 def compact_indices(index_name, num_groups, split):
     logging.info("./index index " + index_name + " " + str(num_groups))
 
-    index = PyDLL(os.path.dirname(__file__) + "/libindex.cpython-3{}-x86_64-linux-gnu.so".format(sys.version_info.minor))
-    index.index_python.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
-    index.index_python.restype = None
-    index.index_python(index_name.encode('utf-8'),num_groups)
+    # Define a function to be run in a separate process
+    def run_index(index_name, num_groups):
+        index = ctypes.CDLL(os.path.dirname(__file__) + "/libindex.cpython-3{}-x86_64-linux-gnu.so".format(sys.version_info.minor))
+        index.index_python.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+        index.index_python.restype = None
+        index.index_python(index_name.encode('utf-8'), num_groups)
 
+    # Create and start a separate process
+    p = multiprocessing.Process(target=run_index, args=(index_name, num_groups))
+    p.start()
+    p.join()  # Wait for the process to complete
+    
     # this will produce index_name.kauai, index_name.oahu, index_name.hawaii in the current directory, move them to the split directory
     [os.rename(index_name + k, index_name + "/indices/split_{}{}".format(split, k)) for k in [".kauai", ".oahu", ".hawaii"]]
 

@@ -10,7 +10,7 @@
 #include <sstream>
 #include <divsufsort.h>
 // #include "wavelet_tree_disk.h"
-#include "wavelet_tree_v2.h"
+#include "fm_index.h"
 
 #include "glog/logging.h"
 
