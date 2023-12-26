@@ -17,27 +17,27 @@ one item
 typedef uint32_t plist_size_t;
 
 class PListChunk {
-public:
-  // Constructor method from a vector of vector of size_t, take ownership of it
-  // from the caller
-  PListChunk(std::vector<std::vector<plist_size_t>> &&data)
-      : data_(std::move(data)), compressor_(CompressionAlgorithm::ZSTD) {}
+  public:
+	// Constructor method from a vector of vector of size_t, take ownership of
+	// it from the caller
+	PListChunk(std::vector<std::vector<plist_size_t>> &&data)
+		: data_(std::move(data)), compressor_(CompressionAlgorithm::ZSTD) {}
 
-  // Constructor method from a compressed string
-  PListChunk(const std::string &data);
+	// Constructor method from a compressed string
+	PListChunk(const std::string &data);
 
-  // Serialize the data
-  std::string serialize();
+	// Serialize the data
+	std::string serialize();
 
-  std::vector<std::vector<plist_size_t>> &data() { return data_; }
+	std::vector<std::vector<plist_size_t>> &data() { return data_; }
 
-  // return a copy
-  std::vector<plist_size_t> lookup(size_t key) {
-    assert(data_[key].size() > 0);
-    return data_[key];
-  }
+	// return a copy
+	std::vector<plist_size_t> lookup(size_t key) {
+		assert(data_[key].size() > 0);
+		return data_[key];
+	}
 
-private:
-  std::vector<std::vector<plist_size_t>> data_;
-  Compressor compressor_;
+  private:
+	std::vector<std::vector<plist_size_t>> data_;
+	Compressor compressor_;
 };

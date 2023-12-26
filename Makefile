@@ -11,7 +11,7 @@ LDFLAGS =
 LIBS = -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -llz4 -lsnappy -lzstd -lglog
 
 # Source files
-SRCS = src/index.cc src/vfr.cc src/kauai.cc src/plist.cc
+SRCS = src/index.cc src/fm_index.cc src/compactor.cc src/vfr.cc src/kauai.cc src/plist.cc
 
 # Object files
 OBJS = $(SRCS:.cc=.o)
@@ -25,7 +25,7 @@ LIB = libindex.so
 all: $(EXEC) $(LIB)
 
 $(EXEC): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(OBJS) -o $(EXEC) $(LDFLAGS) $(LIBS)
+	$(CXX) $(CXXFLAGS) src/cli.cc $(OBJS) -o $(EXEC) $(LDFLAGS) $(LIBS)
 
 $(LIB): $(OBJS)
 	$(CXX) $(CXXFLAGS) -shared $(OBJS) -o $(LIB) $(LDFLAGS) $(LIBS)

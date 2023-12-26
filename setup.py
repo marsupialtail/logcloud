@@ -6,7 +6,7 @@ os.environ['CXX'] = 'g++'
 
 ext_module = Extension(
     'rottnest.libindex',  # Change 'yourpackage' to your package name
-    sources=['src/index.cc', 'src/vfr.cc', 'src/kauai.cc', 'src/plist.cc'],
+    sources=['src/index.cc', 'src/compactor.cc', 'src/fm_index.cc', 'src/vfr.cc', 'src/kauai.cc', 'src/plist.cc'],
     language = "c++",
     include_dirs=['src'],
     library_dirs=[],
