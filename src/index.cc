@@ -17,14 +17,8 @@ The layout of the entire file
 type_A_block_0 | type_A_block_1 | ... | type_B_block_0 | .... | compressed
 metadata page | 8 bytes indicating the length of the compressed metadata page
 
-The metadata page will have the following data structures:
-- 8 bytes indicating the number of types, N
-- 8 bytes indicating the total number of blocks
-- 8 bytes for each type in a list of length N, indicating the order of the types
-in the blocks, e.g. 1, 21, 53, 63
-- 8 bytes for each type in a list of length N, indicating the offset into the
-block-byte-offset array for each type
-- 8 bytes for each block, denoting block offset
+For layout of the metadata file refer to metadata.h
+
 */
 
 #define BLOCK_BYTE_LIMIT 1000000 // chunk size for oahu
@@ -32,7 +26,8 @@ block-byte-offset array for each type
 
 using namespace std;
 
-std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
+std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, 
+                                      int query_type,
 									  std::vector<size_t> chunks,
 									  std::string query_str) {
 	// read the metadata page
@@ -48,42 +43,13 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
 	metadata_page.resize(metadata_page_length);
 	vfr->vfread(&metadata_page[0], metadata_page_length);
 
+    Compressor compressor(CompressionAlgorithm::ZSTD);
+
 	// decompress the metadata page
-	Compressor compressor(CompressionAlgorithm::ZSTD);
-	std::string decompressed_metadata_page =
-		compressor.decompress(metadata_page);
-
-	// read the number of types
-	size_t num_types =
-		*reinterpret_cast<const size_t *>(decompressed_metadata_page.data());
-	// read the number of blocks
-	size_t num_blocks = *reinterpret_cast<const size_t *>(
-		decompressed_metadata_page.data() + sizeof(size_t));
-
-	// read the type order
-	std::vector<int> type_order;
-	for (size_t i = 0; i < num_types; ++i) {
-		type_order.push_back(*reinterpret_cast<const size_t *>(
-			decompressed_metadata_page.data() + 2 * sizeof(size_t) +
-			i * sizeof(size_t)));
-	}
-
-	// read the type offsets
-	std::vector<size_t> type_offsets;
-	for (size_t i = 0; i < num_types + 1; ++i) {
-		type_offsets.push_back(*reinterpret_cast<const size_t *>(
-			decompressed_metadata_page.data() + 2 * sizeof(size_t) +
-			num_types * sizeof(size_t) + i * sizeof(size_t)));
-	}
-
-	// read the block offsets
-	std::vector<size_t> block_offsets;
-	for (size_t i = 0; i < num_blocks + 1; ++i) {
-		block_offsets.push_back(*reinterpret_cast<const size_t *>(
-			decompressed_metadata_page.data() + 2 * sizeof(size_t) +
-			2 * num_types * sizeof(size_t) + sizeof(size_t) +
-			i * sizeof(size_t)));
-	}
+	OahuMetadataPage oahu_metadata_page(metadata_page);
+    std::vector<int>& type_order = oahu_metadata_page.type_order;
+    std::vector<size_t>& type_offsets = oahu_metadata_page.type_offsets;
+    std::vector<size_t>& block_offsets = oahu_metadata_page.byte_offsets;
 
 	// figure out where in the type_order is query_type
 	auto it = std::find(type_order.begin(), type_order.end(), query_type);
@@ -93,7 +59,6 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
 	}
 
 	size_t type_index = std::distance(type_order.begin(), it);
-
 	size_t type_offset = type_offsets[type_index];
 	size_t num_chunks = type_offsets.at(type_index + 1) - type_offset;
 
@@ -105,11 +70,10 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
 		size_t block_offset = block_offsets[type_offset + chunks[i]];
 		size_t next_block_offset = block_offsets[type_offset + chunks[i] + 1];
 		size_t block_size = next_block_offset - block_offset;
-		// LOG(INFO) << "block size: " << block_size << "\n";
+
 		// read the block
 
 		VirtualFileRegion *local_vfr = vfr->slice(block_offset, block_size);
-		// vfr->vfseek(block_offset, SEEK_SET);
 		std::string block;
 		block.resize(block_size);
 		local_vfr->vfread(&block[0], block_size);
@@ -117,11 +81,6 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr, int query_type,
 		// read the length of the compressed strings
 		size_t compressed_strings_length =
 			*reinterpret_cast<const size_t *>(block.data());
-		// LOG(INFO) << "compressed strings length: " <<
-		// compressed_strings_length
-		// << "\n";
-
-		// read the compressed strings
 		std::string compressed_strings =
 			block.substr(sizeof(size_t), compressed_strings_length);
 		std::string decompressed_strings =
@@ -179,13 +138,7 @@ std::map<int, size_t> write_oahu(std::string output_name) {
 	std::vector<size_t> byte_offsets = {0};
 	std::vector<size_t> type_offsets = {0};
 
-	// print out types
-	for (int type : types) {
-		LOG(INFO) << type << "\n";
-	}
-
 	std::map<int, size_t> type_uncompressed_lines_in_block = {};
-	std::map<int, size_t> type_chunks;
 
 	// go through the types
 	for (int type : types) {
@@ -279,7 +232,6 @@ std::map<int, size_t> write_oahu(std::string output_name) {
 
 		LOG(INFO) << "type: " << type << " blocks written: " << blocks_written
 				  << "\n";
-		type_chunks[type] = blocks_written;
 
 		byte_offsets.push_back(byte_offsets.back() + compressed_buffer.size() +
 							   serialized3.size() + sizeof(size_t));
@@ -294,45 +246,13 @@ std::map<int, size_t> write_oahu(std::string output_name) {
 				  << uncompressed_lines_in_block << "\n";
 	}
 
-	// write the metadata page
-	// The metadata page will have the following data structures:
-	// - 8 bytes indicating the number of types, N
-	// - 8 bytes indicating the total number of blocks
-	// - 8 bytes for each type in a list of length N, indicating the order of
-	// the types in the blocks, e.g. 1, 21, 53, 63
-	// - 8 bytes for each type in a list of length N, indicating the offset into
-	// the block-byte-offset array for each type
-	// - 8 bytes for each block, denoting block offset
 
-	std::string metadata_page = "";
-
-	// write the number of types
 	size_t num_types = types.size();
-	metadata_page += std::string((char *)&num_types, sizeof(size_t));
-
-	// write the number of blocks
 	size_t num_blocks = byte_offsets.size() - 1;
-	metadata_page += std::string((char *)&num_blocks, sizeof(size_t));
-
-	// write the type order
-	for (int type : types) {
-		metadata_page += std::string((char *)&type, sizeof(size_t));
-	}
-
-	// write the type offsets
-	for (size_t type_offset : type_offsets) {
-		metadata_page += std::string((char *)&type_offset, sizeof(size_t));
-	}
-
-	// write the block offsets
-	for (size_t byte_offset : byte_offsets) {
-		metadata_page += std::string((char *)&byte_offset, sizeof(size_t));
-	}
-
-	// compress the metadata page
-	std::string compressed_metadata_page =
-		compressor.compress(metadata_page.c_str(), metadata_page.size());
-	size_t compressed_metadata_page_size = compressed_metadata_page.size();
+    OahuMetadataPage oahu_metadata_page(
+        num_types, num_blocks, types, type_offsets , byte_offsets);
+    std::string compressed_metadata_page = oahu_metadata_page.compress();
+    size_t compressed_metadata_page_size = compressed_metadata_page.size();
 
 	// write the compressed metadata page
 

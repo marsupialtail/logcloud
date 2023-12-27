@@ -1,12 +1,13 @@
 #include "index.h"
 
-#define CHUNK_SIZE 100000
+#define CHUNK_SIZE 10000
 
 std::set<size_t> brute_force_search(std::string file_name, std::string keyword)
 {
     std::ifstream file(file_name);
     std::string line;
-    size_t line_number = 0;
+    // line_number starts at 1, because in hawaii we prepend the text with a \n
+    size_t line_number = 1;
     std::set<size_t> result;
     while (std::getline(file, line))
     {
@@ -33,10 +34,10 @@ int main()
         type_uncompressed_lines_in_block[type] = CHUNK_SIZE;
     }
 
-	//write_hawaii("test", type_input_files, type_uncompressed_lines_in_block);
+	write_hawaii("test", type_input_files, type_uncompressed_lines_in_block);
     VirtualFileRegion * vfr_hawaii = new DiskVirtualFileRegion("test.hawaii");
 
-    std::vector<std::string> queries = {"openstack", "openstack-119", "1bad-44dc-8505", "10036", "T9xqQRK4yyc"};
+    std::vector<std::string> queries = {"system", "openstack", "openstack-119", "1bad-44dc-8505", "10036", "T9xqQRK4yyc"};
 
     for (auto query : queries)
     {

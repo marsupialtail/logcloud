@@ -377,32 +377,41 @@ std::tuple<fm_index_t, std::vector<size_t>, std::vector<size_t>>
 bwt_and_build_fm_index(char *Text, size_t block_lines) {
 
 	std::vector<size_t> C(ALPHABET, 0);
-	// std::vector<std::vector<size_t>> FM_index(ALPHABET,
-	// std::vector<size_t>{});
 
 	int n = strlen(Text);
 	LOG(INFO) << "n:" << n << std::endl;
 	// allocate
 	int *SA = (int *)malloc(n * sizeof(int));
-	// sort
-	divsufsort((unsigned char *)Text, SA, strlen(Text));
 
-	// since we are doing this for log files, we also need to keep track of
-	// *which* log every element of the suffix array points to.
+    auto start_time = std::chrono::high_resolution_clock::now();
+	divsufsort((unsigned char *)Text, SA, strlen(Text));
+    auto stop = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+		stop - start_time);
+	LOG(INFO) << "divsufsort took " << duration.count()
+			  << " milliseconds" << std::endl;
+
 	std::vector<size_t> log_idx(n + 1, 0);
 
 	LOG(INFO) << Text[n - 1] << std::endl;
 	// assert(Text[n - 1] == '\n');
 	// first make an auxiliary structure that records where each newline
 	// character is
-	std::vector<size_t> newlines = {0};
+	std::vector<size_t> newlines = {};
+    size_t counter = 0;
+
 	for (int i = 0; i < n; i++) {
 		if (Text[i] == '\n') {
-			newlines.push_back(i);
+            counter += 1;
+            if (counter % block_lines == 0) {
+                newlines.push_back(i);
+                counter = 0;
+            }
 		}
 	}
 
 	LOG(INFO) << "detected " << newlines.size() << " logs " << std::endl;
+    assert(block_lines > 0);
 	LOG(INFO) << "block lines " << block_lines << std::endl;
 	LOG(INFO) << newlines[newlines.size() - 1] << std::endl;
 
@@ -419,69 +428,30 @@ bwt_and_build_fm_index(char *Text, size_t block_lines) {
 	// FILE *debug_fp = fopen("logidx.log", "w");
 	std::vector<char> last_chars = {Text[n - 1]};
 
-	size_t average_bytes_per_line = n / newlines.size();
-
-	auto start_time = std::chrono::high_resolution_clock::now();
+	start_time = std::chrono::high_resolution_clock::now();
 	for (int i = 0; i < n; ++i) {
 		// printf("%c\n", Text[SA[i] - 1]);
 		last_chars.push_back(Text[SA[i] - 1]);
 		char c = Text[SA[i] - 1];
-		// FM_index[c].push_back(i + 1);
 		total_chars[c]++;
 
-		// int start = 0;
-		// int end = newlines.size() - 1;
-		// int mid = (start + end) / 2;
-		// while (start < end) {
-		//     if (newlines[mid] < SA[i] - 1) {
-		//         start = mid + 1;
-		//     } else {
-		//         end = mid;
-		//     }
-		//     mid = (start + end) / 2;
-		// }
-
-		// int my_guess = (SA[i] - 1) / average_bytes_per_line;
-		// // now only binary search a range around the guess
-		// int start = my_guess > 10000 ? my_guess - 10000 : 0;
-		// int end = std::min((int)newlines.size() - 1, my_guess + 10000);
-		// auto it = std::lower_bound(newlines.begin() + start, newlines.begin()
-		// + end, SA[i] - 1);
-
-		// // if not found
-		// if (it - newlines.begin() == end) {
-		//     it = std::lower_bound(newlines.begin(), newlines.end(), SA[i] -
-		//     1);
-		// }
-
 		auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i]);
+		
+		log_idx[i + 1] = it - newlines.begin();
 
-		auto mid = it - newlines.begin();
-
-		if (block_lines == -1) {
-			log_idx[i + 1] = newlines[mid - 1];
-		} else {
-			log_idx[i + 1] = (mid - 1) / block_lines;
-		}
-
-		// TODO: will this work for the first log? Somehow it works, but I don't
-		// know why
-
-		// log_idx[i + 1] = (start - 1) / ROW_GROUP_SIZE;
 		// std::cout << log_idx[i + 1] << std::endl;
 		// fprintf(debug_fp, "%ld\n", log_idx[i+1]);
 	}
 	// fclose(debug_fp);
 
-	auto stop = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+	stop = std::chrono::high_resolution_clock::now();
+	duration = std::chrono::duration_cast<std::chrono::milliseconds>(
 		stop - start_time);
 	LOG(INFO) << "log_idx binary search took " << duration.count()
 			  << " milliseconds" << std::endl;
 
 	for (int i = 0; i < ALPHABET; i++) {
 		for (int j = 0; j < i; j++)
-			// C[i] += FM_index[j].size();
 			C[i] += total_chars[j];
 	}
 
