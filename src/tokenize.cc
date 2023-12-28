@@ -34,7 +34,7 @@ const int ROW_GROUP_SIZE = 100000;
 const int ROW_GROUPS_PER_FILE = 10;
 const int OUTLIER_THRESHOLD = 1000;
 const std::string delimiters = ": \t";
-const bool write_ts_in_parquet = false;
+const bool write_ts_in_parquet = true;
 
 namespace fs = std::filesystem;
 

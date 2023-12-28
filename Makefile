@@ -38,7 +38,7 @@ clean:
 
 CXXTESTFLAGS = 
 
-TESTS = plist_test compressor_test
+TESTS = plist_test compressor_test index_test
 
 # Rule to make all tests
 test: $(TESTS)
@@ -55,6 +55,9 @@ plist_test: test/plist_test.cc src/plist.cc
 
 compressor_test: test/compressor_test.cc 
 	$(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ -lzstd -llz4 -lsnappy
+
+index_test: test/index_test.cc src/*.o
+	$(CXX) $(CXXFLAGS) $(CXXTESTFLAGS) $^ -I src/ -o $@ -ldivsufsort -laws-cpp-sdk-s3 -laws-cpp-sdk-core -lzstd -llz4 -lsnappy -lglog -fopenmp       
 
 # Clean test executables
 clean-tests:

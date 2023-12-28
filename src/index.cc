@@ -114,7 +114,9 @@ std::vector<plist_size_t> search_oahu(VirtualFileRegion *vfr,
 	return row_groups;
 }
 
-std::map<int, size_t> write_oahu(std::string output_name) {
+std::map<int, size_t> write_oahu(
+    std::map<int, std::string> type_input_files,
+    std::string output_name) {
 
 	// first figure out the number of types by listing all
 	// compressed/compacted_type* files

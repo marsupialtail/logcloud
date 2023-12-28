@@ -18,10 +18,13 @@ typedef uint32_t plist_size_t;
 
 class PListChunk {
   public:
-	// Constructor method from a vector of vector of size_t, take ownership of
-	// it from the caller
+	// move constructor
 	PListChunk(std::vector<std::vector<plist_size_t>> &&data)
 		: data_(std::move(data)), compressor_(CompressionAlgorithm::ZSTD) {}
+    
+    // 
+    PListChunk(const std::vector<std::vector<plist_size_t>> &data)
+		: data_(data), compressor_(CompressionAlgorithm::ZSTD) {}
 
 	// Constructor method from a compressed string
 	PListChunk(const std::string &data);

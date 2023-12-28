@@ -425,7 +425,6 @@ bwt_and_build_fm_index(char *Text, size_t block_lines) {
 	// always the length of the file assuming file ends with "\n"
 	log_idx[0] = newlines[newlines.size() - 2];
 
-	// FILE *debug_fp = fopen("logidx.log", "w");
 	std::vector<char> last_chars = {Text[n - 1]};
 
 	start_time = std::chrono::high_resolution_clock::now();
@@ -436,13 +435,8 @@ bwt_and_build_fm_index(char *Text, size_t block_lines) {
 		total_chars[c]++;
 
 		auto it = std::lower_bound(newlines.begin(), newlines.end(), SA[i]);
-		
 		log_idx[i + 1] = it - newlines.begin();
-
-		// std::cout << log_idx[i + 1] << std::endl;
-		// fprintf(debug_fp, "%ld\n", log_idx[i+1]);
 	}
-	// fclose(debug_fp);
 
 	stop = std::chrono::high_resolution_clock::now();
 	duration = std::chrono::duration_cast<std::chrono::milliseconds>(
