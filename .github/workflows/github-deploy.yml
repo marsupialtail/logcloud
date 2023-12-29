@@ -41,7 +41,7 @@ jobs:
           sudo apt install -y -V libgandiva-glib-dev # For Gandiva GLib (C)
           sudo apt install -y -V libparquet-dev # For Apache Parquet C++
           sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
-          sudo apt-get install build-essential
+          sudo apt-get install g++
           sudo apt install -y libgoogle-glog-dev make cmake unzip libz-dev libssl-dev libzstd-dev libsnappy-dev liblz4-dev libcurl4-openssl-dev
           
           git clone https://github.com/aws/aws-sdk-cpp.git
