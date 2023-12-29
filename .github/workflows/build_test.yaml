@@ -1,0 +1,44 @@
+name: Build & Test
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  buildtest:
+    name: Build wheels and test install
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Build & run
+        run: ci/wheels/manylinux/build.sh
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: wheelhouse/*
+
+  buildtest-macos:
+    name: Build macOS wheels and test install
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Build & run (macOS)
+        run: ci/wheels/macos/build.sh
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: macos-wheels
+          path: wheelhouse/*
