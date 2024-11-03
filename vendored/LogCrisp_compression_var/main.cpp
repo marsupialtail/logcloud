@@ -803,8 +803,11 @@ void process(int largestCapsule, string now_input_path, string now_output_path, 
 // 	ProfilerStop();
 // } 
 
-extern "C" int compressor_wrapper(std::string& chunk, std::string output_path, std::string template_path, int prefix) {
+extern "C" int compressor_wrapper(const char * chunk_ptr, const char * output_path_ptr, const char * template_path_ptr, int prefix) {
 
+	std::string chunk(chunk_ptr);
+	std::string output_path(output_path_ptr);
+	std::string template_path(template_path_ptr);
 	// clock_t start = clock();
 	srand(4);
 	int compression_level = 10;

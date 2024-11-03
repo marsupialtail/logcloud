@@ -296,9 +296,13 @@ int matchFile(char* mbuf, int len, LengthParser* parser, map<int, VarArray*>& va
 // //*/
 // } 
 
-extern "C" int trainer_wrapper(std::string sample, std::string output_path) {
+extern "C" int trainer_wrapper(const char * sample_ptr, const char * output_path_ptr) {
 	
 	//Basic input check
+	//
+
+    std::string sample(sample_ptr);
+    std::string output_path(output_path_ptr);
 
     timeval stime_s = ___StatTime_Start();    
 	
